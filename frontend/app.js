@@ -1,0 +1,738 @@
+/* =====================================================
+   ЙОГА ТРЕКЕР — Основная логика
+   ===================================================== */
+
+const API = '';  // пустая строка = тот же хост
+
+// =====================================================
+// СОСТОЯНИЕ ПРИЛОЖЕНИЯ
+// =====================================================
+const state = {
+  token: null,
+  user: null,
+  currentTab: 'home',
+  currentMonth: new Date(),
+  monthSessions: [],
+  allStreak: 0,
+  allTotal: 0,
+  selectedDay: null,   // для модалки календаря
+};
+
+// =====================================================
+// МОТИВАЦИОННЫЕ ФРАЗЫ (31 штука — одна на каждый день)
+// =====================================================
+const QUOTES = [
+  'Каждый вдох — это новое начало. Каждый выдох — отпускание.',
+  'Йога — это путешествие к себе, через себя, к себе.',
+  'Тело — твой храм. Береги его, и оно будет служить тебе верно.',
+  'Сила приходит не из того, что ты можешь делать. Она приходит из преодоления того, что ты считал невозможным.',
+  'Будь там, где ты есть. Иначе ты пропустишь свою жизнь.',
+  'Дыши глубоко, двигайся осознанно, живи полностью.',
+  'Йога — не о прикосновении к пальцам ног. Это о том, что ты узнаёшь на пути вниз.',
+  'Тишина внутри — это твоя истинная сила.',
+  'Каждая практика делает тебя немного сильнее, немного спокойнее.',
+  'Принимай своё тело там, где оно есть сегодня.',
+  'Практика — это не совершенство. Практика — это прогресс.',
+  'Соединись с настоящим моментом. Он единственный реальный.',
+  'Твой коврик — твоё убежище. Возвращайся к нему снова и снова.',
+  'Ум спокоен, когда тело в движении.',
+  'Отпусти всё, что не служит тебе. Держи лишь то, что несёт свет.',
+  'Каждый день — это возможность начать снова.',
+  'Слушай своё тело. Оно знает мудрость, которую разум ещё не постиг.',
+  'Движение — это медитация в действии.',
+  'Ты не занимаешься йогой — ты становишься йогой.',
+  'Мягкость к себе — это тоже практика.',
+  'Один шаг в день на коврике меняет всю жизнь.',
+  'Равновесие — не состояние, а постоянный выбор.',
+  'Труд сегодня — покой завтра.',
+  'Позволь себе быть несовершенным. Именно здесь и начинается рост.',
+  'Твоё дыхание — якорь в любом шторме.',
+  'Нет плохой практики. Есть только та, которую ты пропустил.',
+  'Каждое утро — новая страница. Напиши на ней что-то красивое.',
+  'Сила — это не напряжение. Сила — это гибкость духа.',
+  'Заботься о своём теле. Это единственное место, где тебе жить.',
+  'Вдохни уверенность. Выдохни сомнения.',
+  'Практика — это любовь. К себе, к жизни, к настоящему моменту.',
+];
+
+const DIFF_LABELS = ['', '🟢 Легко', '🟡 Средне', '🟠 Сложно', '🔴 Тяжело'];
+const DIFF_COLORS = ['', '#6dbe6d', '#f0c040', '#f09040', '#e05050'];
+
+const AVATARS = ['🧘', '🌸', '🌿', '✨', '🦋', '🌻', '🌙', '⭐', '🍃', '🌊'];
+
+const MONTH_NAMES = [
+  'Январь','Февраль','Март','Апрель','Май','Июнь',
+  'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'
+];
+const WEEKDAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+// =====================================================
+// ИНИЦИАЛИЗАЦИЯ
+// =====================================================
+document.addEventListener('DOMContentLoaded', async () => {
+  // Пытаемся восстановить сессию из localStorage
+  state.token = localStorage.getItem('yt_token');
+  const savedUser = localStorage.getItem('yt_user');
+  if (savedUser) state.user = JSON.parse(savedUser);
+
+  // Пробуем авторизацию через Telegram
+  if (window.Telegram?.WebApp) {
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+    // Устанавливаем тему хедбара
+    tg.setHeaderColor('#FFFFFF');
+
+    if (tg.initData) {
+      await authTelegram(tg.initData);
+    }
+  }
+
+  // Проверяем токен
+  if (state.token) {
+    const ok = await verifyToken();
+    if (ok) {
+      showApp();
+      return;
+    }
+  }
+
+  // Показываем экран авторизации
+  hideLoading();
+  showElement('auth-screen');
+});
+
+async function authTelegram(initData) {
+  try {
+    const res = await fetch(`${API}/api/auth/telegram`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ initData })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      saveSession(data.token, data.user);
+    }
+  } catch (e) {
+    console.warn('Telegram auth failed:', e);
+  }
+}
+
+async function verifyToken() {
+  try {
+    const res = await apiFetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      state.user = data.user;
+      localStorage.setItem('yt_user', JSON.stringify(data.user));
+      return true;
+    }
+  } catch (e) {}
+  // Токен невалидный
+  clearSession();
+  return false;
+}
+
+function saveSession(token, user) {
+  state.token = token;
+  state.user = user;
+  localStorage.setItem('yt_token', token);
+  localStorage.setItem('yt_user', JSON.stringify(user));
+}
+
+function clearSession() {
+  state.token = null;
+  state.user = null;
+  localStorage.removeItem('yt_token');
+  localStorage.removeItem('yt_user');
+}
+
+// =====================================================
+// АВТОРИЗАЦИЯ — EMAIL OTP
+// =====================================================
+let emailForOtp = '';
+
+async function sendOtp() {
+  const email = document.getElementById('auth-email').value.trim();
+  if (!email || !email.includes('@')) {
+    showAuthError('Введите корректный email');
+    return;
+  }
+
+  hideAuthError();
+  emailForOtp = email;
+
+  try {
+    setButtonLoading('.auth-step#auth-step-email .btn-primary', true);
+    const res = await fetch(`${API}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      hideElement('auth-step-email');
+      showElement('auth-step-otp');
+    } else {
+      showAuthError(data.error || 'Ошибка отправки');
+    }
+  } catch (e) {
+    showAuthError('Ошибка соединения. Проверьте настройки email в .env');
+  } finally {
+    setButtonLoading('.auth-step#auth-step-email .btn-primary', false);
+  }
+}
+
+async function verifyOtp() {
+  const code = document.getElementById('auth-otp').value.trim();
+  if (code.length !== 6) {
+    showAuthError('Введите 6-значный код');
+    return;
+  }
+
+  hideAuthError();
+
+  try {
+    const res = await fetch(`${API}/api/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: emailForOtp, code })
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      saveSession(data.token, data.user);
+      showApp();
+    } else {
+      showAuthError(data.error || 'Неверный код');
+    }
+  } catch (e) {
+    showAuthError('Ошибка соединения');
+  }
+}
+
+function backToEmail() {
+  hideElement('auth-step-otp');
+  showElement('auth-step-email');
+  hideAuthError();
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  showElement('auth-error');
+}
+function hideAuthError() { hideElement('auth-error'); }
+
+function setButtonLoading(selector, loading) {
+  const btn = document.querySelector(selector);
+  if (btn) btn.textContent = loading ? 'Отправка...' : 'Получить код';
+}
+
+// =====================================================
+// ЗАПУСК ПРИЛОЖЕНИЯ
+// =====================================================
+async function showApp() {
+  hideLoading();
+  hideElement('auth-screen');
+  showElement('app');
+
+  // Применяем настройки темы
+  applyTheme(state.user?.theme || 'light', state.user?.color_theme || 'pink');
+
+  // Загружаем начальные данные
+  await Promise.all([
+    loadStreak(),
+    loadTodayStatus(),
+  ]);
+
+  setupNoteInput();
+  renderHomeDateQuote();
+  updateNavAvatar();
+}
+
+// =====================================================
+// ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК
+// =====================================================
+function switchTab(tab) {
+  // Убираем активный класс у всех панелей и кнопок
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+  // Показываем нужную панель
+  document.getElementById(`tab-${tab}`).classList.remove('hidden');
+  document.getElementById(`nav-${tab}`).classList.add('active');
+  state.currentTab = tab;
+
+  // Загружаем данные при переключении
+  if (tab === 'calendar') loadCalendar();
+  if (tab === 'notes')    loadNotes();
+  if (tab === 'profile')  loadProfile();
+}
+
+// =====================================================
+// ВКЛАДКА 1: ГЛАВНАЯ
+// =====================================================
+function renderHomeDateQuote() {
+  const now = new Date();
+
+  // Дата
+  const dateStr = now.toLocaleDateString('ru-RU', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+  document.getElementById('home-date').textContent =
+    dateStr.charAt(0).toUpperCase() + dateStr.slice(1);
+
+  // Приветствие по времени
+  const hour = now.getHours();
+  let greeting = 'Добрый день!';
+  if (hour < 5)  greeting = 'Доброй ночи!';
+  else if (hour < 12) greeting = 'Доброе утро!';
+  else if (hour < 17) greeting = 'Добрый день!';
+  else greeting = 'Добрый вечер!';
+  document.getElementById('home-greeting').textContent = greeting;
+
+  // Цитата — по дню месяца
+  const quoteIdx = (now.getDate() - 1) % QUOTES.length;
+  document.getElementById('quote-text').textContent = QUOTES[quoteIdx];
+
+  // Подпись цитаты — день практики
+  const dayLabel = document.getElementById('quote-day-label');
+  if (dayLabel) dayLabel.textContent = `День ${now.getDate()}`;
+}
+
+async function loadTodayStatus() {
+  const today = getTodayStr();
+  try {
+    const res = await apiFetch(`/api/yoga/sessions/${today.slice(0,4)}/${today.slice(5,7)}`);
+    const data = await res.json();
+    const todaySession = data.sessions?.find(s => s.date === today);
+    updateTodayStatus(todaySession);
+  } catch (e) {}
+}
+
+function updateTodayStatus(session) {
+  const el = document.getElementById('today-log-status');
+  if (session) {
+    el.textContent = `Отмечено: ${DIFF_LABELS[session.difficulty]}`;
+    el.style.color = DIFF_COLORS[session.difficulty];
+    // Подсвечиваем активную кнопку
+    document.querySelectorAll('.quick-log-card .diff-btn').forEach(btn => {
+      btn.classList.remove('active-diff');
+    });
+    const activeBtn = document.querySelector(`.quick-log-card .diff-${session.difficulty}`);
+    if (activeBtn) activeBtn.classList.add('active-diff');
+  } else {
+    el.textContent = 'Сегодня ещё не отмечено';
+    el.style.color = '';
+    document.querySelectorAll('.quick-log-card .diff-btn').forEach(btn => {
+      btn.classList.remove('active-diff');
+    });
+  }
+}
+
+async function quickLog(difficulty) {
+  const today = getTodayStr();
+  try {
+    const res = await apiFetch('/api/yoga/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ date: today, difficulty })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      updateTodayStatus(data.session);
+      await loadStreak();
+      toast(`Отмечено: ${DIFF_LABELS[difficulty]}`);
+    }
+  } catch (e) {
+    toast('Ошибка сохранения');
+  }
+}
+
+async function loadStreak() {
+  try {
+    const res = await apiFetch('/api/yoga/streak');
+    const data = await res.json();
+    state.allStreak = data.streak;
+    state.allTotal  = data.total;
+    document.getElementById('streak-mini-count').textContent = data.streak;
+    document.getElementById('streak-count').textContent = data.streak;
+    document.getElementById('total-count').textContent  = data.total;
+  } catch (e) {}
+}
+
+// =====================================================
+// ВКЛАДКА 2: КАЛЕНДАРЬ
+// =====================================================
+function changeMonth(delta) {
+  state.currentMonth = new Date(
+    state.currentMonth.getFullYear(),
+    state.currentMonth.getMonth() + delta,
+    1
+  );
+  loadCalendar();
+}
+
+async function loadCalendar() {
+  const year  = state.currentMonth.getFullYear();
+  const month = state.currentMonth.getMonth() + 1;
+
+  // Обновляем заголовок
+  document.getElementById('cal-month-title').textContent =
+    `${MONTH_NAMES[month - 1]} ${year}`;
+
+  // Загружаем стрик
+  await loadStreak();
+
+  // Загружаем сессии месяца
+  try {
+    const res = await apiFetch(`/api/yoga/sessions/${year}/${month}`);
+    const data = await res.json();
+    state.monthSessions = data.sessions || [];
+  } catch (e) {
+    state.monthSessions = [];
+  }
+
+  renderCalendar(year, month);
+}
+
+function renderCalendar(year, month) {
+  const grid = document.getElementById('calendar-grid');
+
+  // Первый день недели (0=вс, 1=пн...)
+  const firstDay = new Date(year, month - 1, 1).getDay();
+  const offset   = firstDay === 0 ? 6 : firstDay - 1; // пн=0
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const today = getTodayStr();
+
+  // Создаём карту сессий
+  const sessionMap = {};
+  state.monthSessions.forEach(s => { sessionMap[s.date] = s; });
+
+  let html = `
+    <div class="calendar-weekdays">
+      ${WEEKDAYS_SHORT.map(d => `<div class="calendar-weekday">${d}</div>`).join('')}
+    </div>
+    <div class="calendar-days">
+  `;
+
+  // Пустые ячейки до первого дня
+  for (let i = 0; i < offset; i++) {
+    html += `<div class="cal-day empty"></div>`;
+  }
+
+  // Дни месяца
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const session = sessionMap[dateStr];
+    const isToday = dateStr === today;
+    const isFuture = dateStr > today;
+
+    let classes = 'cal-day';
+    if (isToday)  classes += ' today';
+    if (isFuture) classes += ' future';
+    if (session)  classes += ' logged';
+
+    const dotColor = session ? DIFF_COLORS[session.difficulty] : 'transparent';
+    const clickAttr = !isFuture ? `onclick="openDayModal('${dateStr}')"` : '';
+
+    html += `
+      <div class="${classes}" ${clickAttr}>
+        <span class="cal-day-num">${day}</span>
+        <span class="cal-day-dot" style="background:${dotColor}"></span>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  grid.innerHTML = html;
+}
+
+function openDayModal(dateStr) {
+  state.selectedDay = dateStr;
+  const [year, month, day] = dateStr.split('-');
+  const date = new Date(dateStr + 'T00:00:00');
+  const dateLabel = date.toLocaleDateString('ru-RU', {
+    weekday: 'long', day: 'numeric', month: 'long'
+  });
+  document.getElementById('modal-date-title').textContent =
+    dateLabel.charAt(0).toUpperCase() + dateLabel.slice(1);
+  showElement('day-modal');
+}
+
+function closeDayModal() {
+  hideElement('day-modal');
+  state.selectedDay = null;
+}
+
+async function logDay(difficulty) {
+  if (!state.selectedDay) return;
+  closeDayModal();
+
+  try {
+    const res = await apiFetch('/api/yoga/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ date: state.selectedDay, difficulty })
+    });
+    if (res.ok) {
+      await loadCalendar();
+      if (state.selectedDay === getTodayStr()) {
+        await loadTodayStatus();
+      }
+      toast(`Сохранено: ${DIFF_LABELS[difficulty]}`);
+    }
+  } catch (e) {
+    toast('Ошибка сохранения');
+  }
+}
+
+async function deleteDay() {
+  if (!state.selectedDay) return;
+  const date = state.selectedDay;
+  closeDayModal();
+
+  try {
+    await apiFetch(`/api/yoga/sessions/${date}`, { method: 'DELETE' });
+    await loadCalendar();
+    if (date === getTodayStr()) await loadTodayStatus();
+    toast('Отметка удалена');
+  } catch (e) {
+    toast('Ошибка удаления');
+  }
+}
+
+// =====================================================
+// ВКЛАДКА 3: МЫСЛИ
+// =====================================================
+function setupNoteInput() {
+  const input = document.getElementById('note-input');
+  const counter = document.getElementById('char-count');
+  input.addEventListener('input', () => {
+    counter.textContent = `${input.value.length} / 2000`;
+    counter.style.color = input.value.length > 1800 ? '#e05050' : '';
+  });
+}
+
+async function loadNotes() {
+  try {
+    const res = await apiFetch('/api/notes');
+    const data = await res.json();
+    renderNotes(data.notes || []);
+  } catch (e) {
+    renderNotes([]);
+  }
+}
+
+function renderNotes(notes) {
+  const list = document.getElementById('notes-list');
+  const empty = document.getElementById('notes-empty');
+
+  if (!notes.length) {
+    empty.classList.remove('hidden');
+    list.innerHTML = '';
+    list.appendChild(empty);
+    return;
+  }
+
+  empty.classList.add('hidden');
+  list.innerHTML = notes.map(note => `
+    <div class="note-card" id="note-${note.id}">
+      <div class="note-card-date">${formatDateTime(note.created_at)}</div>
+      <div class="note-card-text">${escapeHtml(note.content)}</div>
+      <button class="note-card-delete" onclick="deleteNote(${note.id})" title="Удалить">✕</button>
+    </div>
+  `).join('');
+}
+
+async function saveNote() {
+  const input = document.getElementById('note-input');
+  const content = input.value.trim();
+
+  if (!content) {
+    toast('Напиши что-нибудь 💭');
+    return;
+  }
+
+  try {
+    const res = await apiFetch('/api/notes', {
+      method: 'POST',
+      body: JSON.stringify({ content })
+    });
+    if (res.ok) {
+      input.value = '';
+      document.getElementById('char-count').textContent = '0 / 2000';
+      await loadNotes();
+      toast('Мысль сохранена ✓');
+    }
+  } catch (e) {
+    toast('Ошибка сохранения');
+  }
+}
+
+async function deleteNote(id) {
+  try {
+    const res = await apiFetch(`/api/notes/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      const el = document.getElementById(`note-${id}`);
+      if (el) {
+        el.style.opacity = '0';
+        el.style.transform = 'translateX(20px)';
+        el.style.transition = 'all 0.2s';
+        setTimeout(() => { el.remove(); checkEmptyNotes(); }, 200);
+      }
+    }
+  } catch (e) {
+    toast('Ошибка удаления');
+  }
+}
+
+function checkEmptyNotes() {
+  const list = document.getElementById('notes-list');
+  if (!list.querySelector('.note-card')) {
+    const empty = document.getElementById('notes-empty');
+    empty.classList.remove('hidden');
+    list.appendChild(empty);
+  }
+}
+
+// =====================================================
+// ВКЛАДКА 4: ПРОФИЛЬ
+// =====================================================
+function loadProfile() {
+  const u = state.user;
+  if (!u) return;
+
+  document.getElementById('profile-avatar-display').textContent = u.avatar || '🧘';
+  document.getElementById('profile-name-display').textContent   = u.name || 'Пользователь';
+  document.getElementById('profile-name-input').value           = u.name || '';
+
+  // Аватары
+  const avatarGrid = document.getElementById('avatar-grid');
+  avatarGrid.innerHTML = AVATARS.map(av => `
+    <button class="avatar-btn ${av === u.avatar ? 'selected' : ''}"
+            onclick="selectAvatar('${av}')">${av}</button>
+  `).join('');
+
+  // Кнопки темы
+  document.querySelectorAll('.theme-toggle-btn').forEach(btn => btn.classList.remove('active-theme'));
+  const themeBtn = document.getElementById(`btn-${u.theme || 'light'}`);
+  if (themeBtn) themeBtn.classList.add('active-theme');
+
+  // Цветовые кнопки
+  document.querySelectorAll('.color-theme-btn').forEach(btn => btn.classList.remove('active-color'));
+  const colorBtn = document.querySelector(`.theme-${u.color_theme || 'pink'}`);
+  if (colorBtn) colorBtn.classList.add('active-color');
+}
+
+async function selectAvatar(avatar) {
+  await updateProfile({ avatar });
+}
+
+async function saveName() {
+  const name = document.getElementById('profile-name-input').value.trim();
+  if (!name) { toast('Введи имя'); return; }
+  await updateProfile({ name });
+}
+
+async function setTheme(theme) {
+  await updateProfile({ theme });
+  applyTheme(theme, state.user?.color_theme || 'pink');
+}
+
+async function setColorTheme(colorTheme) {
+  await updateProfile({ color_theme: colorTheme });
+  applyTheme(state.user?.theme || 'light', colorTheme);
+}
+
+async function updateProfile(data) {
+  try {
+    const res = await apiFetch('/api/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    });
+    if (res.ok) {
+      const result = await res.json();
+      state.user = result.user;
+      localStorage.setItem('yt_user', JSON.stringify(result.user));
+      loadProfile();
+      updateNavAvatar();
+      toast('Сохранено ✓');
+    }
+  } catch (e) {
+    toast('Ошибка сохранения');
+  }
+}
+
+function applyTheme(theme, colorTheme) {
+  const body = document.body;
+
+  // Убираем все классы тем
+  body.classList.remove('theme-dark', 'color-blue', 'color-grey', 'color-purple');
+
+  if (theme === 'dark') body.classList.add('theme-dark');
+  if (colorTheme !== 'pink') body.classList.add(`color-${colorTheme}`);
+}
+
+function updateNavAvatar() {
+  const avatar = state.user?.avatar || '🧘';
+  document.getElementById('nav-avatar').textContent = avatar;
+  document.getElementById('profile-avatar-display').textContent = avatar;
+}
+
+function logout() {
+  if (!confirm('Выйти из аккаунта?')) return;
+  clearSession();
+  location.reload();
+}
+
+// =====================================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// =====================================================
+async function apiFetch(path, options = {}) {
+  return fetch(`${API}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${state.token}`,
+      ...(options.headers || {})
+    }
+  });
+}
+
+function getTodayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function formatDateTime(isoString) {
+  const d = new Date(isoString);
+  return d.toLocaleDateString('ru-RU', {
+    day: 'numeric', month: 'long',
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function showElement(id)  { document.getElementById(id)?.classList.remove('hidden'); }
+function hideElement(id)  { document.getElementById(id)?.classList.add('hidden'); }
+function hideLoading()    { hideElement('loading-screen'); }
+
+function toast(message) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = message;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2200);
+}
