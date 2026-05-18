@@ -25,8 +25,11 @@
 
       <!-- Шаг 0: выбор способа входа -->
       <div id="auth-step-choose" class="auth-step">
-        <button id="btn-phone-auth" class="btn-primary btn-phone" onclick="loginByPhone()">
-          📱 Войти по номеру телефона
+        <button id="btn-tg-auth" class="btn-primary" onclick="loginByTelegram()" style="display:none">
+          ⚡ Войти через Telegram
+        </button>
+        <button id="btn-phone-auth" class="btn-primary btn-phone" onclick="loginByPhone()" style="display:none">
+          📱 Поделиться номером телефона
         </button>
         <div class="auth-divider"><span>или</span></div>
         <button class="btn-ghost" onclick="showEmailStep()">✉️ Войти по email</button>

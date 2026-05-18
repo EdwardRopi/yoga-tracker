@@ -75,30 +75,38 @@ document.addEventListener('DOMContentLoaded', async () => {
   const savedUser = localStorage.getItem('yt_user');
   if (savedUser) state.user = JSON.parse(savedUser);
 
-  // Пробуем авторизацию через Telegram
+  // Инициализируем Telegram WebApp
   if (window.Telegram?.WebApp) {
     const tg = window.Telegram.WebApp;
     tg.ready();
     tg.expand();
-    // Устанавливаем тему хедбара
     tg.setHeaderColor('#FFFFFF');
-
-    if (tg.initData) {
-      await authTelegram(tg.initData);
-    }
   }
 
-  // Проверяем токен
+  // Проверяем существующий токен
   if (state.token) {
     const ok = await verifyToken();
-    if (ok) {
-      showApp();
-      return;
-    }
+    if (ok) { showApp(); return; }
+  }
+
+  // Автовход через Telegram — только если пользователь явно не вышел
+  const forcedLogout = localStorage.getItem('yt_force_auth');
+  if (!forcedLogout && window.Telegram?.WebApp?.initData) {
+    await authTelegram(window.Telegram.WebApp.initData);
+    if (state.token) { showApp(); return; }
   }
 
   // Показываем экран авторизации
   hideLoading();
+  // Показываем кнопки Telegram если мы внутри Telegram
+  if (window.Telegram?.WebApp?.initData) {
+    const tgBtn = document.getElementById('btn-tg-auth');
+    if (tgBtn) tgBtn.style.display = '';
+  }
+  if (window.Telegram?.WebApp?.requestContact) {
+    const phBtn = document.getElementById('btn-phone-auth');
+    if (phBtn) phBtn.style.display = '';
+  }
   showElement('auth-screen');
 });
 
@@ -138,6 +146,7 @@ function saveSession(token, user) {
   state.user = user;
   localStorage.setItem('yt_token', token);
   localStorage.setItem('yt_user', JSON.stringify(user));
+  localStorage.removeItem('yt_force_auth'); // сбрасываем флаг выхода
 }
 
 function clearSession() {
@@ -145,6 +154,18 @@ function clearSession() {
   state.user = null;
   localStorage.removeItem('yt_token');
   localStorage.removeItem('yt_user');
+}
+
+// =====================================================
+// АВТОРИЗАЦИЯ — БЫСТРЫЙ ВХОД ЧЕРЕЗ TELEGRAM
+// =====================================================
+async function loginByTelegram() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg?.initData) { showAuthError('Открой через Telegram'); return; }
+  hideAuthError();
+  await authTelegram(tg.initData);
+  if (state.token) showApp();
+  else showAuthError('Ошибка входа через Telegram');
 }
 
 // =====================================================
@@ -271,13 +292,6 @@ function backToEmail() {
   hideAuthError();
 }
 
-// Скрываем кнопку телефона если не в Telegram
-document.addEventListener('DOMContentLoaded', () => {
-  if (!window.Telegram?.WebApp?.requestContact) {
-    const phoneBtn = document.getElementById('btn-phone-auth');
-    if (phoneBtn) phoneBtn.style.display = 'none';
-  }
-});
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
@@ -744,6 +758,7 @@ function updateNavAvatar() {
 function logout() {
   if (!confirm('Выйти из аккаунта?')) return;
   clearSession();
+  localStorage.setItem('yt_force_auth', '1'); // блокируем автовход
   location.reload();
 }
 
