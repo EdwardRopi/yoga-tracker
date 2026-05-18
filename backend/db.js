@@ -13,6 +13,7 @@ async function initDB() {
         id          SERIAL PRIMARY KEY,
         telegram_id TEXT UNIQUE,
         email       TEXT UNIQUE,
+        phone       TEXT UNIQUE,
         name        TEXT NOT NULL DEFAULT 'Пользователь',
         avatar      TEXT NOT NULL DEFAULT '🧘',
         theme       TEXT NOT NULL DEFAULT 'light',
@@ -20,6 +21,7 @@ async function initDB() {
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT UNIQUE;
 
       CREATE TABLE IF NOT EXISTS yoga_sessions (
         id         SERIAL PRIMARY KEY,

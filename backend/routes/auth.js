@@ -14,6 +14,7 @@ function safeUser(row) {
     _id:         String(row.id),
     telegram_id: row.telegram_id,
     email:       row.email,
+    phone:       row.phone,
     name:        row.name,
     avatar:      row.avatar,
     theme:       row.theme,
@@ -132,6 +133,58 @@ router.post('/verify-otp', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Ошибка проверки кода' });
+  }
+});
+
+// POST /api/auth/phone  (через Telegram requestContact)
+router.post('/phone', async (req, res) => {
+  try {
+    const { phone, telegram_id } = req.body;
+    if (!phone) return res.status(400).json({ error: 'Номер телефона обязателен' });
+
+    // Нормализуем: оставляем только цифры
+    const normalized = phone.replace(/\D/g, '');
+    if (normalized.length < 7) return res.status(400).json({ error: 'Неверный номер' });
+
+    // Ищем сначала по телефону, потом по telegram_id
+    let result = await pool.query('SELECT * FROM users WHERE phone = $1', [normalized]);
+    let user;
+
+    if (result.rows.length > 0) {
+      user = result.rows[0];
+      // Привязываем telegram_id если ещё не привязан
+      if (telegram_id && !user.telegram_id) {
+        const upd = await pool.query(
+          'UPDATE users SET telegram_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+          [telegram_id, user.id]
+        );
+        user = upd.rows[0];
+      }
+    } else if (telegram_id) {
+      // Может уже есть аккаунт по telegram_id — обновим телефон
+      const tgRes = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [telegram_id]);
+      if (tgRes.rows.length > 0) {
+        const upd = await pool.query(
+          'UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+          [normalized, tgRes.rows[0].id]
+        );
+        user = upd.rows[0];
+      }
+    }
+
+    if (!user) {
+      // Создаём нового пользователя
+      const ins = await pool.query(
+        'INSERT INTO users (phone, telegram_id, name) VALUES ($1, $2, $3) RETURNING *',
+        [normalized, telegram_id || null, '+' + normalized]
+      );
+      user = ins.rows[0];
+    }
+
+    res.json({ token: createToken(user.id), user: safeUser(user) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Ошибка авторизации' });
   }
 });
 

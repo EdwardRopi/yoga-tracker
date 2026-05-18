@@ -148,6 +148,59 @@ function clearSession() {
 }
 
 // =====================================================
+// АВТОРИЗАЦИЯ — ТЕЛЕФОН (Telegram requestContact)
+// =====================================================
+async function loginByPhone() {
+  const tg = window.Telegram?.WebApp;
+  if (!tg) {
+    showAuthError('Открой приложение через Telegram');
+    return;
+  }
+
+  try {
+    tg.requestContact(async (ok, contactData) => {
+      if (!ok || !contactData?.contact) {
+        showAuthError('Отказано в доступе к номеру');
+        return;
+      }
+      const phone       = contactData.contact.phone_number;
+      const telegram_id = contactData.contact.user_id
+        ? String(contactData.contact.user_id)
+        : (tg.initDataUnsafe?.user?.id ? String(tg.initDataUnsafe.user.id) : null);
+
+      hideAuthError();
+      const res = await fetch(`${API}/api/auth/phone`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, telegram_id })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        saveSession(data.token, data.user);
+        showApp();
+      } else {
+        showAuthError(data.error || 'Ошибка входа');
+      }
+    });
+  } catch (e) {
+    showAuthError('Ошибка запроса контакта');
+  }
+}
+
+function showEmailStep() {
+  hideElement('auth-step-choose');
+  showElement('auth-step-email');
+  hideAuthError();
+}
+
+function backToChoose() {
+  hideElement('auth-step-email');
+  hideElement('auth-step-otp');
+  showElement('auth-step-choose');
+  hideAuthError();
+}
+
+// =====================================================
 // АВТОРИЗАЦИЯ — EMAIL OTP
 // =====================================================
 let emailForOtp = '';
@@ -217,6 +270,14 @@ function backToEmail() {
   showElement('auth-step-email');
   hideAuthError();
 }
+
+// Скрываем кнопку телефона если не в Telegram
+document.addEventListener('DOMContentLoaded', () => {
+  if (!window.Telegram?.WebApp?.requestContact) {
+    const phoneBtn = document.getElementById('btn-phone-auth');
+    if (phoneBtn) phoneBtn.style.display = 'none';
+  }
+});
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
@@ -537,10 +598,10 @@ function renderNotes(notes) {
 
   empty.classList.add('hidden');
   list.innerHTML = notes.map(note => `
-    <div class="note-card" id="note-${note.id}">
-      <div class="note-card-date">${formatDateTime(note.created_at)}</div>
+    <div class="note-card" id="note-${note._id}">
+      <div class="note-card-date">${formatDateTime(note.createdAt)}</div>
       <div class="note-card-text">${escapeHtml(note.content)}</div>
-      <button class="note-card-delete" onclick="deleteNote(${note.id})" title="Удалить">✕</button>
+      <button class="note-card-delete" onclick="deleteNote('${note._id}')" title="Удалить">✕</button>
     </div>
   `).join('');
 }

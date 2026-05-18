@@ -23,15 +23,27 @@
       <h1 class="auth-title">Йога Трекер</h1>
       <p class="auth-subtitle">Твой личный дневник практики</p>
 
-      <div id="auth-step-email" class="auth-step">
-        <p class="auth-label">Войти по email</p>
-        <input type="email" id="auth-email" class="auth-input" placeholder="your@email.com" />
-        <button class="btn-primary" onclick="sendOtp()">Получить код</button>
+      <!-- Шаг 0: выбор способа входа -->
+      <div id="auth-step-choose" class="auth-step">
+        <button id="btn-phone-auth" class="btn-primary btn-phone" onclick="loginByPhone()">
+          📱 Войти по номеру телефона
+        </button>
+        <div class="auth-divider"><span>или</span></div>
+        <button class="btn-ghost" onclick="showEmailStep()">✉️ Войти по email</button>
       </div>
 
+      <!-- Шаг 1: email -->
+      <div id="auth-step-email" class="auth-step hidden">
+        <p class="auth-label">Введи email</p>
+        <input type="email" id="auth-email" class="auth-input" placeholder="your@email.com" />
+        <button class="btn-primary" onclick="sendOtp()">Получить код</button>
+        <button class="btn-ghost" onclick="backToChoose()">← Назад</button>
+      </div>
+
+      <!-- Шаг 2: OTP код -->
       <div id="auth-step-otp" class="auth-step hidden">
         <p class="auth-label">Введи код из письма</p>
-        <input type="text" id="auth-otp" class="auth-input otp-input" placeholder="000000" maxlength="6" />
+        <input type="text" id="auth-otp" class="auth-input otp-input" placeholder="000000" maxlength="6" inputmode="numeric" />
         <button class="btn-primary" onclick="verifyOtp()">Войти</button>
         <button class="btn-ghost" onclick="backToEmail()">← Изменить email</button>
       </div>
