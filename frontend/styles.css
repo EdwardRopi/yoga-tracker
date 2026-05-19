@@ -825,3 +825,129 @@ body::after {
 ::-webkit-scrollbar { width: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--primary-soft); border-radius: 4px; }
+
+/* =====================================================
+   ТИП ПРАКТИКИ + ТАЙМЕР
+   ===================================================== */
+.practice-card { display: flex; flex-direction: column; gap: 14px; }
+
+/* Сетка типов практики */
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.type-btn {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 4px;
+  padding: 10px 4px;
+  background: var(--surface-2);
+  backdrop-filter: blur(10px);
+  border: 2px solid transparent;
+  border-radius: 14px;
+  font-size: 20px; cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+  color: var(--text);
+}
+.type-btn span {
+  font-size: 10px; color: var(--text-secondary);
+  font-weight: 600; white-space: nowrap;
+}
+.type-btn:active { transform: scale(0.9); }
+.type-btn.active-type {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: 0 4px 16px var(--glow);
+  transform: scale(1.05);
+}
+.type-btn.active-type span { color: var(--primary); }
+
+/* Кнопка СТАРТ */
+.btn-start-timer {
+  width: 100%; padding: 16px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white; border: none;
+  border-radius: var(--radius-sm);
+  font-size: 17px; font-weight: 700;
+  cursor: pointer; letter-spacing: 0.3px;
+  box-shadow: 0 6px 24px var(--glow);
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.btn-start-timer:active { transform: scale(0.96); }
+
+/* Пульс-анимация на кнопке старт */
+.start-pulse {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 0 0 0 rgba(255,255,255,0.6);
+  animation: pulseRing 1.5s ease-out infinite;
+  flex-shrink: 0;
+}
+@keyframes pulseRing {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.6); }
+  70%  { box-shadow: 0 0 0 10px rgba(255,255,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
+
+/* Дисплей таймера */
+.timer-display {
+  display: flex; align-items: center; justify-content: center;
+  gap: 12px; padding: 20px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+}
+.timer-icon { font-size: 28px; animation: timerPulse 1s ease-in-out infinite; }
+@keyframes timerPulse {
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.4; }
+}
+#timer-time {
+  font-size: 42px; font-weight: 900; letter-spacing: 2px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text; font-variant-numeric: tabular-nums;
+}
+
+/* Кнопка СТОП */
+.btn-stop-timer {
+  width: 100%; padding: 14px;
+  background: transparent;
+  color: #ff6b6b;
+  border: 2px solid rgba(255,107,107,0.4);
+  border-radius: var(--radius-sm);
+  font-size: 15px; font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-stop-timer:hover { background: rgba(255,107,107,0.1); }
+.btn-stop-timer:active { transform: scale(0.97); }
+
+/* =====================================================
+   ТОСТ ДОСТИЖЕНИЯ
+   ===================================================== */
+.achievement-toast {
+  position: fixed; top: 20px; right: 16px;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px;
+  padding: 14px 18px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2), 0 0 0 1px var(--primary-soft);
+  z-index: 600; max-width: 280px;
+  animation: achieveIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
+  transition: opacity 0.4s, transform 0.4s;
+}
+@keyframes achieveIn {
+  from { opacity: 0; transform: translateX(120%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.ach-icon { font-size: 36px; flex-shrink: 0; filter: drop-shadow(0 0 8px var(--glow)); }
+.ach-info { display: flex; flex-direction: column; gap: 2px; }
+.ach-label { font-size: 10px; color: var(--primary); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+.ach-name  { font-size: 15px; font-weight: 800; color: var(--text); }
+.ach-desc  { font-size: 12px; color: var(--text-secondary); }

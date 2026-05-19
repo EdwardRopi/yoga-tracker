@@ -77,9 +77,39 @@
           <p class="quote-text-big" id="quote-text"></p>
         </div>
 
+        <!-- Тип практики + Таймер -->
+        <div class="card practice-card">
+          <p class="card-label">Тип практики</p>
+          <div class="type-grid" id="type-selector">
+            <button class="type-btn active-type" data-type="general"   onclick="selectType('general')">🧘<span>Общая</span></button>
+            <button class="type-btn" data-type="hatha"                 onclick="selectType('hatha')">🌿<span>Хатха</span></button>
+            <button class="type-btn" data-type="vinyasa"               onclick="selectType('vinyasa')">🌊<span>Виньяса</span></button>
+            <button class="type-btn" data-type="yin"                   onclick="selectType('yin')">🌙<span>Инь</span></button>
+            <button class="type-btn" data-type="meditation"            onclick="selectType('meditation')">🧠<span>Медит.</span></button>
+            <button class="type-btn" data-type="breathing"             onclick="selectType('breathing')">💨<span>Дыхание</span></button>
+            <button class="type-btn" data-type="stretch"               onclick="selectType('stretch')">🤸<span>Растяжка</span></button>
+          </div>
+
+          <!-- Режим: ожидание -->
+          <div id="timer-idle">
+            <button class="btn-start-timer" onclick="startTimer()">
+              <span class="start-pulse"></span>▶ Начать практику
+            </button>
+          </div>
+
+          <!-- Режим: таймер запущен -->
+          <div id="timer-running" class="hidden">
+            <div class="timer-display">
+              <span class="timer-icon">⏱</span>
+              <span id="timer-time">00:00</span>
+            </div>
+            <button class="btn-stop-timer" onclick="stopTimer()">⏹ Завершить</button>
+          </div>
+        </div>
+
         <!-- Быстрая отметка -->
-        <div class="card quick-log-card">
-          <p class="card-label">Как прошла практика сегодня?</p>
+        <div class="card quick-log-card" id="difficulty-card">
+          <p class="card-label" id="difficulty-label">Как прошла практика сегодня?</p>
           <div class="difficulty-row">
             <button class="diff-btn diff-1" onclick="quickLog(1)">🟢<br><span>Легко</span></button>
             <button class="diff-btn diff-2" onclick="quickLog(2)">🟡<br><span>Средне</span></button>

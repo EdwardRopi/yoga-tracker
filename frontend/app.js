@@ -15,7 +15,11 @@ const state = {
   monthSessions: [],
   allStreak: 0,
   allTotal: 0,
-  selectedDay: null,   // для модалки календаря
+  selectedDay: null,      // для модалки календаря
+  selectedType: 'general', // тип практики
+  timerStartTime: null,    // время старта таймера
+  timerInterval: null,     // ID интервала
+  timerDuration: 0,        // длительность в секундах
 };
 
 // =====================================================
@@ -325,6 +329,7 @@ async function showApp() {
   setupNoteInput();
   renderHomeDateQuote();
   updateNavAvatar();
+  restoreTimer();
 }
 
 // =====================================================
@@ -407,22 +412,162 @@ function updateTodayStatus(session) {
   }
 }
 
+// =====================================================
+// ТАЙМЕР И ТИП ПРАКТИКИ
+// =====================================================
+function selectType(type) {
+  state.selectedType = type;
+  document.querySelectorAll('.type-btn').forEach(btn => {
+    btn.classList.toggle('active-type', btn.dataset.type === type);
+  });
+}
+
+function startTimer() {
+  state.timerStartTime = Date.now();
+  state.timerDuration  = 0;
+  localStorage.setItem('yt_timer_start', state.timerStartTime);
+  localStorage.setItem('yt_timer_type', state.selectedType);
+
+  showElement('timer-running');
+  hideElement('timer-idle');
+  hideElement('difficulty-card');
+
+  state.timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - state.timerStartTime) / 1000);
+    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const secs = String(elapsed % 60).padStart(2, '0');
+    const el = document.getElementById('timer-time');
+    if (el) el.textContent = `${mins}:${secs}`;
+  }, 1000);
+}
+
+function stopTimer() {
+  state.timerDuration = Math.floor((Date.now() - state.timerStartTime) / 1000);
+  clearInterval(state.timerInterval);
+  state.timerInterval = null;
+  localStorage.removeItem('yt_timer_start');
+  localStorage.removeItem('yt_timer_type');
+
+  showElement('timer-idle');
+  hideElement('timer-running');
+  showElement('difficulty-card');
+
+  // Обновляем подпись с результатом
+  const mins = Math.floor(state.timerDuration / 60);
+  const secs = state.timerDuration % 60;
+  const label = document.getElementById('difficulty-label');
+  if (label) label.textContent = `Практика ${mins}м ${secs}с — как было? 💪`;
+}
+
+function restoreTimer() {
+  // Восстанавливаем таймер если приложение было закрыто во время практики
+  const savedStart = localStorage.getItem('yt_timer_start');
+  const savedType  = localStorage.getItem('yt_timer_type');
+  if (!savedStart) return;
+
+  state.timerStartTime = parseInt(savedStart);
+  if (savedType) {
+    state.selectedType = savedType;
+    document.querySelectorAll('.type-btn').forEach(btn => {
+      btn.classList.toggle('active-type', btn.dataset.type === savedType);
+    });
+  }
+
+  showElement('timer-running');
+  hideElement('timer-idle');
+  hideElement('difficulty-card');
+
+  state.timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - state.timerStartTime) / 1000);
+    const mins = String(Math.floor(elapsed / 60)).padStart(2, '0');
+    const secs = String(elapsed % 60).padStart(2, '0');
+    const el = document.getElementById('timer-time');
+    if (el) el.textContent = `${mins}:${secs}`;
+  }, 1000);
+}
+
 async function quickLog(difficulty) {
-  const today = getTodayStr();
+  const today    = getTodayStr();
+  const type     = state.selectedType || 'general';
+  const duration = state.timerDuration || 0;
+
   try {
     const res = await apiFetch('/api/yoga/sessions', {
       method: 'POST',
-      body: JSON.stringify({ date: today, difficulty })
+      body: JSON.stringify({ date: today, difficulty, type, duration })
     });
     if (res.ok) {
       const data = await res.json();
       updateTodayStatus(data.session);
       await loadStreak();
+
+      // Сбрасываем состояние после логирования
+      state.timerDuration = 0;
+      const label = document.getElementById('difficulty-label');
+      if (label) label.textContent = 'Как прошла практика сегодня?';
+
+      // Начисляем XP и проверяем достижения
+      awardXP(difficulty, duration);
+
       toast(`Отмечено: ${DIFF_LABELS[difficulty]}`);
     }
   } catch (e) {
     toast('Ошибка сохранения');
   }
+}
+
+async function awardXP(difficulty, duration) {
+  try {
+    const streakRes = await apiFetch('/api/yoga/streak');
+    const streakData = await streakRes.json();
+    const streak = streakData.streak || 0;
+
+    const res = await apiFetch('/api/progress/award', {
+      method: 'POST',
+      body: JSON.stringify({ difficulty, duration, streak })
+    });
+    if (res.ok) {
+      checkAchievements();
+    }
+  } catch (e) {
+    console.warn('XP award failed:', e);
+  }
+}
+
+async function checkAchievements() {
+  try {
+    const res = await apiFetch('/api/achievements/check', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.newAchievements?.length) {
+        data.newAchievements.forEach((ach, i) => {
+          setTimeout(() => showAchievementToast(ach), i * 2000);
+        });
+      }
+    }
+  } catch (e) {}
+}
+
+function showAchievementToast(achievement) {
+  const existing = document.querySelector('.achievement-toast');
+  if (existing) existing.remove();
+
+  const el = document.createElement('div');
+  el.className = 'achievement-toast';
+  el.innerHTML = `
+    <div class="ach-icon">${achievement.icon}</div>
+    <div class="ach-info">
+      <div class="ach-label">Новое достижение!</div>
+      <div class="ach-name">${achievement.name}</div>
+      <div class="ach-desc">${achievement.desc}</div>
+    </div>
+  `;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(120%)';
+    setTimeout(() => el.remove(), 400);
+  }, 3000);
 }
 
 async function loadStreak() {
