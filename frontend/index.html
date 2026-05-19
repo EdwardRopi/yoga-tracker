@@ -208,6 +208,69 @@
         </div>
       </div>
 
+      <!-- ВКЛАДКА 5: ПРАКТИКИ -->
+      <div id="tab-practice" class="tab-panel hidden">
+
+        <!-- ДЫХАТЕЛЬНЫЕ УПРАЖНЕНИЯ -->
+        <div class="practice-header">
+          <h2>Практики</h2>
+          <p class="notes-subtitle">Дыхание и программы 🌿</p>
+        </div>
+
+        <!-- Выбор техники (показывается когда нет активного дыхания) -->
+        <div id="breathing-choose">
+          <div class="section-label">💨 Дыхательные упражнения</div>
+          <div class="breathing-techniques">
+            <button class="technique-card" onclick="startBreathing('478')">
+              <div class="technique-icon">🫁</div>
+              <div class="technique-name">4-7-8</div>
+              <div class="technique-desc">Успокаивающее</div>
+            </button>
+            <button class="technique-card" onclick="startBreathing('box')">
+              <div class="technique-icon">📦</div>
+              <div class="technique-name">Коробочное</div>
+              <div class="technique-desc">Концентрация</div>
+            </button>
+            <button class="technique-card" onclick="startBreathing('deep')">
+              <div class="technique-icon">🌊</div>
+              <div class="technique-name">Глубокое</div>
+              <div class="technique-desc">Расслабление</div>
+            </button>
+            <button class="technique-card" onclick="startBreathing('energize')">
+              <div class="technique-icon">⚡</div>
+              <div class="technique-name">Энергия</div>
+              <div class="technique-desc">Бодрость</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Активное дыхательное упражнение -->
+        <div id="breathing-active" class="hidden">
+          <div class="breathing-screen">
+            <div class="breathing-title" id="breathing-title">4-7-8</div>
+            <div class="breathing-circle-wrap">
+              <div class="breathing-circle" id="breathing-circle">
+                <div class="breathing-phase" id="breathing-phase">Готов?</div>
+                <div class="breathing-countdown" id="breathing-countdown"></div>
+              </div>
+            </div>
+            <div class="breathing-cycles">
+              Цикл <span id="breathing-cycle">0</span> из <span id="breathing-total">4</span>
+            </div>
+            <button class="btn-stop-timer" onclick="stopBreathing()">⏹ Остановить</button>
+          </div>
+        </div>
+
+        <!-- ПРОГРАММЫ -->
+        <div id="programs-section">
+          <div class="section-label" style="margin-top:20px">🗓 Программы</div>
+          <div id="programs-list">
+            <div class="programs-loading">Загрузка...</div>
+          </div>
+        </div>
+
+      </div>
+
       <!-- ВКЛАДКА 4: ПРОФИЛЬ -->
       <div id="tab-profile" class="tab-panel hidden">
         <div class="profile-header">
@@ -297,6 +360,10 @@
       <button class="nav-btn" id="nav-notes" onclick="switchTab('notes')">
         <span class="nav-icon">💭</span>
         <span class="nav-label">Мысли</span>
+      </button>
+      <button class="nav-btn" id="nav-practice" onclick="switchTab('practice')">
+        <span class="nav-icon">🌿</span>
+        <span class="nav-label">Практики</span>
       </button>
       <button class="nav-btn" id="nav-profile" onclick="switchTab('profile')">
         <span class="nav-icon" id="nav-avatar">🧘</span>

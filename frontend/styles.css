@@ -827,6 +827,139 @@ body::after {
 ::-webkit-scrollbar-thumb { background: var(--primary-soft); border-radius: 4px; }
 
 /* =====================================================
+   ВКЛАДКА ПРАКТИКИ
+   ===================================================== */
+.practice-header { padding: 8px 4px 18px; }
+.practice-header h2 {
+  font-size: 24px; font-weight: 800;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.section-label {
+  font-size: 13px; font-weight: 700; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.8px;
+  margin-bottom: 10px; padding: 0 2px;
+}
+
+/* Техники дыхания */
+.breathing-techniques {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 8px;
+}
+.technique-card {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 18px 12px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+  cursor: pointer; transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+  box-shadow: var(--glass-shadow);
+}
+.technique-card:active { transform: scale(0.93); }
+.technique-icon { font-size: 32px; }
+.technique-name { font-size: 14px; font-weight: 700; color: var(--text); }
+.technique-desc { font-size: 11px; color: var(--text-secondary); }
+
+/* Экран активного дыхания */
+.breathing-screen {
+  display: flex; flex-direction: column;
+  align-items: center; gap: 20px;
+  padding: 10px 0 20px;
+}
+.breathing-title {
+  font-size: 20px; font-weight: 800;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.breathing-circle-wrap {
+  width: 200px; height: 200px;
+  display: flex; align-items: center; justify-content: center;
+}
+.breathing-circle {
+  width: 160px; height: 160px; border-radius: 50%;
+  background: var(--primary-soft);
+  border: 3px solid var(--primary);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  box-shadow: 0 0 40px var(--glow);
+  transition: transform 0.3s ease;
+}
+.breathing-circle.breath-in {
+  animation: breatheIn var(--breath-dur, 4s) ease-in-out forwards;
+}
+.breathing-circle.breath-out {
+  animation: breatheOut var(--breath-dur, 8s) ease-in-out forwards;
+}
+.breathing-circle.breath-hold {
+  animation: breatheHold 0.3s ease forwards;
+}
+@keyframes breatheIn {
+  from { transform: scale(0.7); box-shadow: 0 0 20px var(--glow); }
+  to   { transform: scale(1.2); box-shadow: 0 0 60px var(--glow); }
+}
+@keyframes breatheOut {
+  from { transform: scale(1.2); box-shadow: 0 0 60px var(--glow); }
+  to   { transform: scale(0.7); box-shadow: 0 0 20px var(--glow); }
+}
+@keyframes breatheHold {
+  to { transform: scale(1); }
+}
+.breathing-phase {
+  font-size: 18px; font-weight: 800; color: var(--primary);
+}
+.breathing-countdown {
+  font-size: 36px; font-weight: 900; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.breathing-cycles {
+  font-size: 14px; color: var(--text-secondary); font-weight: 600;
+}
+
+/* Карточки программ */
+.program-card { padding: 16px; margin-bottom: 10px; }
+.program-top {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+}
+.program-icon { font-size: 28px; flex-shrink: 0; }
+.program-info { flex: 1; }
+.program-name { font-size: 15px; font-weight: 700; color: var(--text); }
+.program-days { font-size: 12px; color: var(--text-secondary); }
+.btn-start-program {
+  padding: 8px 16px; border-radius: 20px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  color: white; border: none; font-size: 13px; font-weight: 700;
+  cursor: pointer; white-space: nowrap;
+  box-shadow: 0 4px 12px var(--glow);
+  transition: all 0.2s;
+}
+.btn-start-program:active { transform: scale(0.95); }
+.btn-done { color: var(--text-muted); font-size: 13px; background: none; border: none; }
+.program-done-badge { font-size: 20px; }
+.program-progress-wrap {
+  width: 100%; height: 8px;
+  background: var(--surface-2); border-radius: 8px; overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+.program-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+  border-radius: 8px;
+  transition: width 0.8s cubic-bezier(0.34,1.2,0.64,1);
+  box-shadow: 0 0 6px var(--glow);
+}
+.program-progress-label {
+  font-size: 11px; color: var(--text-muted); margin-top: 6px; text-align: right;
+}
+.programs-loading {
+  font-size: 13px; color: var(--text-muted); text-align: center; padding: 20px;
+}
+
+/* =====================================================
    ДИНАМИЧЕСКИЕ ТЕМЫ ПО ВРЕМЕНИ СУТОК
    ===================================================== */
 .time-morning {

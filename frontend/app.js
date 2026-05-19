@@ -351,6 +351,7 @@ function switchTab(tab) {
   if (tab === 'calendar') loadCalendar();
   if (tab === 'notes')    loadNotes();
   if (tab === 'profile')  loadProfile();
+  if (tab === 'practice') loadPracticeTab();
 }
 
 // =====================================================
@@ -1011,6 +1012,172 @@ function escapeHtml(text) {
 function showElement(id)  { document.getElementById(id)?.classList.remove('hidden'); }
 function hideElement(id)  { document.getElementById(id)?.classList.add('hidden'); }
 function hideLoading()    { hideElement('loading-screen'); }
+
+// =====================================================
+// ВКЛАДКА 5: ПРАКТИКИ — ДЫХАНИЕ + ПРОГРАММЫ
+// =====================================================
+
+const BREATHING = {
+  '478':      { name: '4-7-8',       cycles: 4, phases: [{ l:'Вдох',    s:4 },{ l:'Задержи', s:7 },{ l:'Выдох',    s:8 }] },
+  'box':      { name: 'Коробочное',  cycles: 4, phases: [{ l:'Вдох',    s:4 },{ l:'Задержи', s:4 },{ l:'Выдох',    s:4 },{ l:'Задержи', s:4 }] },
+  'deep':     { name: 'Глубокое',    cycles: 5, phases: [{ l:'Вдох',    s:5 },{ l:'Выдох',   s:5 }] },
+  'energize': { name: 'Энергия',     cycles: 6, phases: [{ l:'Вдох',    s:3 },{ l:'Выдох',   s:2 }] },
+};
+
+let breathingState = {
+  active: false, technique: null,
+  cycle: 0, phaseIdx: 0,
+  countdown: 0, timer: null,
+};
+
+function loadPracticeTab() {
+  loadPrograms();
+}
+
+function startBreathing(key) {
+  const tech = BREATHING[key];
+  if (!tech) return;
+
+  breathingState = { active: true, technique: key, cycle: 1, phaseIdx: 0, countdown: tech.phases[0].s, timer: null };
+
+  hideElement('breathing-choose');
+  showElement('breathing-active');
+
+  document.getElementById('breathing-title').textContent = tech.name;
+  document.getElementById('breathing-total').textContent = tech.cycles;
+  document.getElementById('breathing-cycle').textContent = 1;
+
+  runBreathingPhase();
+}
+
+function runBreathingPhase() {
+  const tech  = BREATHING[breathingState.technique];
+  const phase = tech.phases[breathingState.phaseIdx];
+
+  document.getElementById('breathing-phase').textContent     = phase.l;
+  document.getElementById('breathing-countdown').textContent = phase.s;
+  breathingState.countdown = phase.s;
+
+  // Анимация круга
+  const circle = document.getElementById('breathing-circle');
+  circle.className = 'breathing-circle';
+  void circle.offsetWidth; // reflow
+  if (phase.l === 'Вдох')    circle.classList.add('breath-in');
+  else if (phase.l === 'Выдох') circle.classList.add('breath-out');
+  else                          circle.classList.add('breath-hold');
+
+  breathingState.timer = setInterval(() => {
+    breathingState.countdown--;
+    const el = document.getElementById('breathing-countdown');
+    if (el) el.textContent = breathingState.countdown;
+
+    if (breathingState.countdown <= 0) {
+      clearInterval(breathingState.timer);
+      nextBreathingPhase();
+    }
+  }, 1000);
+}
+
+function nextBreathingPhase() {
+  if (!breathingState.active) return;
+  const tech = BREATHING[breathingState.technique];
+
+  breathingState.phaseIdx++;
+  if (breathingState.phaseIdx >= tech.phases.length) {
+    // Цикл завершён
+    breathingState.phaseIdx = 0;
+    if (breathingState.cycle >= tech.cycles) {
+      finishBreathing();
+      return;
+    }
+    breathingState.cycle++;
+    document.getElementById('breathing-cycle').textContent = breathingState.cycle;
+  }
+  runBreathingPhase();
+}
+
+function finishBreathing() {
+  clearInterval(breathingState.timer);
+  breathingState.active = false;
+
+  const circle = document.getElementById('breathing-circle');
+  if (circle) { circle.className = 'breathing-circle'; }
+  document.getElementById('breathing-phase').textContent     = '✅ Готово!';
+  document.getElementById('breathing-countdown').textContent = '';
+
+  // Начисляем XP за дыхание
+  awardXP(1, 0);
+  toast('Дыхательное упражнение завершено! +10 XP 💨');
+
+  setTimeout(() => stopBreathing(), 2000);
+}
+
+function stopBreathing() {
+  clearInterval(breathingState.timer);
+  breathingState.active = false;
+
+  const circle = document.getElementById('breathing-circle');
+  if (circle) circle.className = 'breathing-circle';
+
+  hideElement('breathing-active');
+  showElement('breathing-choose');
+}
+
+// ---- ПРОГРАММЫ ----
+async function loadPrograms() {
+  try {
+    const res  = await apiFetch('/api/programs');
+    const data = await res.json();
+    renderPrograms(data.programs || []);
+  } catch (e) {
+    document.getElementById('programs-list').innerHTML =
+      '<p style="color:var(--text-muted);font-size:13px;text-align:center">Ошибка загрузки</p>';
+  }
+}
+
+function renderPrograms(programs) {
+  const list = document.getElementById('programs-list');
+  if (!list) return;
+
+  list.innerHTML = programs.map(p => {
+    const pct      = p.active ? Math.round((p.daysDone / p.totalDays) * 100) : 0;
+    const btnLabel = p.completed ? '✅ Завершено' : p.active ? 'Продолжить' : 'Начать';
+    const btnClass = p.completed ? 'btn-done' : 'btn-start-program';
+
+    return `
+      <div class="program-card card">
+        <div class="program-top">
+          <span class="program-icon">${p.icon}</span>
+          <div class="program-info">
+            <div class="program-name">${p.name}</div>
+            <div class="program-days">${p.totalDays} дней</div>
+          </div>
+          ${!p.completed ? `<button class="${btnClass}" onclick="handleProgram('${p.id}', ${p.active})">${btnLabel}</button>` : '<span class="program-done-badge">✅</span>'}
+        </div>
+        ${p.active ? `
+          <div class="program-progress-wrap">
+            <div class="program-progress-fill" style="width:${pct}%"></div>
+          </div>
+          <div class="program-progress-label">${p.daysDone} из ${p.totalDays} дней · ${pct}%</div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+async function handleProgram(programId, isActive) {
+  if (isActive) { toast('Продолжай практиковать! 💪'); return; }
+  try {
+    const res = await apiFetch('/api/programs/start', {
+      method: 'POST',
+      body: JSON.stringify({ programId })
+    });
+    if (res.ok) {
+      toast('Программа начата! 🎯');
+      loadPrograms();
+    }
+  } catch (e) { toast('Ошибка'); }
+}
 
 // =====================================================
 // ДИНАМИЧЕСКАЯ ТЕМА ПО ВРЕМЕНИ СУТОК
