@@ -821,8 +821,60 @@ function checkEmptyNotes() {
 }
 
 // =====================================================
-// ВКЛАДКА 4: ПРОФИЛЬ
+// ВКЛАДКА 4: ПРОФИЛЬ + ПРОГРЕСС + ДОСТИЖЕНИЯ
 // =====================================================
+async function loadProgress() {
+  try {
+    const res  = await apiFetch('/api/progress');
+    const data = await res.json();
+    const p    = data.progress;
+    if (!p) return;
+
+    document.getElementById('level-badge').textContent = `⭐ Ур.${p.level}`;
+    document.getElementById('level-name').textContent  = p.name;
+    document.getElementById('level-xp').textContent    = `${p.xp} XP`;
+
+    if (p.isMax) {
+      document.getElementById('xp-bar-fill').style.width  = '100%';
+      document.getElementById('xp-bar-label').textContent = '🏆 Максимальный уровень!';
+    } else {
+      const pct = Math.min(100, Math.round((p.xpCurrent / p.xpNeeded) * 100));
+      document.getElementById('xp-bar-fill').style.width  = `${pct}%`;
+      document.getElementById('xp-bar-label').textContent =
+        `До «${p.nextName}»: ${p.xpToNext} XP`;
+    }
+  } catch (e) {}
+}
+
+async function loadAchievements() {
+  try {
+    const res  = await apiFetch('/api/achievements');
+    const data = await res.json();
+    renderAchievements(data.achievements || []);
+  } catch (e) {}
+}
+
+function renderAchievements(achievements) {
+  const grid = document.getElementById('achievements-grid');
+  if (!grid) return;
+
+  const unlocked = achievements.filter(a => a.unlocked).length;
+  const total    = achievements.length;
+
+  grid.innerHTML = `
+    <div class="ach-counter">${unlocked} / ${total} открыто</div>
+    <div class="ach-items">
+      ${achievements.map(a => `
+        <div class="ach-item ${a.unlocked ? 'unlocked' : 'locked'}" title="${a.name}: ${a.desc}">
+          <div class="ach-item-icon">${a.icon}</div>
+          <div class="ach-item-name">${a.name}</div>
+          ${a.unlocked ? '' : '<div class="ach-lock">🔒</div>'}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
 function loadProfile() {
   const u = state.user;
   if (!u) return;
@@ -830,6 +882,10 @@ function loadProfile() {
   document.getElementById('profile-avatar-display').textContent = u.avatar || '🧘';
   document.getElementById('profile-name-display').textContent   = u.name || 'Пользователь';
   document.getElementById('profile-name-input').value           = u.name || '';
+
+  // Загружаем прогресс и достижения
+  loadProgress();
+  loadAchievements();
 
   // Аватары
   const avatarGrid = document.getElementById('avatar-grid');
