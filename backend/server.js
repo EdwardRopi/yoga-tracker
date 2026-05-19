@@ -13,10 +13,14 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../frontend')));
 
 // API маршруты
-app.use('/api/auth',    require('./routes/auth'));
-app.use('/api/yoga',    require('./routes/yoga'));
-app.use('/api/notes',   require('./routes/notes'));
-app.use('/api/profile', require('./routes/profile'));
+app.use('/api/auth',         require('./routes/auth'));
+app.use('/api/yoga',         require('./routes/yoga'));
+app.use('/api/notes',        require('./routes/notes'));
+app.use('/api/profile',      require('./routes/profile'));
+app.use('/api/progress',     require('./routes/progress'));
+app.use('/api/achievements', require('./routes/achievements'));
+app.use('/api/programs',     require('./routes/programs'));
+app.use('/api/stats',        require('./routes/stats'));
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));

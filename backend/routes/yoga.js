@@ -10,6 +10,8 @@ function safeSession(row) {
     date:       row.date,
     difficulty: row.difficulty,
     note:       row.note,
+    type:       row.type     || 'general',
+    duration:   row.duration || 0,
     createdAt:  row.created_at,
     updatedAt:  row.updated_at,
   };
@@ -34,20 +36,26 @@ router.get('/sessions/:year/:month', auth, async (req, res) => {
 // POST /api/yoga/sessions
 router.post('/sessions', auth, async (req, res) => {
   try {
-    const { date, difficulty, note } = req.body;
+    const { date, difficulty, note, type, duration } = req.body;
     if (!date || !difficulty) return res.status(400).json({ error: 'date и difficulty обязательны' });
     if (difficulty < 1 || difficulty > 4) return res.status(400).json({ error: 'difficulty от 1 до 4' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Формат даты: YYYY-MM-DD' });
 
+    const validTypes = ['general','hatha','vinyasa','yin','meditation','breathing','stretch'];
+    const sessionType = validTypes.includes(type) ? type : 'general';
+    const sessionDuration = Number(duration) || 0;
+
     const result = await pool.query(
-      `INSERT INTO yoga_sessions (user_id, date, difficulty, note)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO yoga_sessions (user_id, date, difficulty, note, type, duration)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (user_id, date)
        DO UPDATE SET difficulty = EXCLUDED.difficulty,
                      note       = EXCLUDED.note,
+                     type       = EXCLUDED.type,
+                     duration   = EXCLUDED.duration,
                      updated_at = NOW()
        RETURNING *`,
-      [req.userId, date, difficulty, note || '']
+      [req.userId, date, difficulty, note || '', sessionType, sessionDuration]
     );
 
     res.json({ session: safeSession(result.rows[0]) });
