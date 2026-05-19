@@ -603,21 +603,25 @@ function renderNotes(notes) {
   const list = document.getElementById('notes-list');
   const empty = document.getElementById('notes-empty');
 
+  // Удаляем только карточки заметок, не трогая notes-empty
+  list.querySelectorAll('.note-card').forEach(el => el.remove());
+
   if (!notes.length) {
-    empty.classList.remove('hidden');
-    list.innerHTML = '';
-    list.appendChild(empty);
+    if (empty) empty.classList.remove('hidden');
     return;
   }
 
-  empty.classList.add('hidden');
-  list.innerHTML = notes.map(note => `
+  if (empty) empty.classList.add('hidden');
+
+  const html = notes.map(note => `
     <div class="note-card" id="note-${note._id}">
       <div class="note-card-date">${formatDateTime(note.createdAt)}</div>
       <div class="note-card-text">${escapeHtml(note.content)}</div>
       <button class="note-card-delete" onclick="deleteNote('${note._id}')" title="Удалить">✕</button>
     </div>
   `).join('');
+
+  list.insertAdjacentHTML('afterbegin', html);
 }
 
 async function saveNote() {
