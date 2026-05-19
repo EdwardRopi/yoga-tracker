@@ -330,6 +330,8 @@ async function showApp() {
   renderHomeDateQuote();
   updateNavAvatar();
   restoreTimer();
+  applyTimeTheme();
+  loadWeekStats();
 }
 
 // =====================================================
@@ -508,6 +510,9 @@ async function quickLog(difficulty) {
 
       // Начисляем XP и проверяем достижения
       awardXP(difficulty, duration);
+
+      // Обновляем недельный график
+      loadWeekStats();
 
       toast(`Отмечено: ${DIFF_LABELS[difficulty]}`);
     }
@@ -1006,6 +1011,70 @@ function escapeHtml(text) {
 function showElement(id)  { document.getElementById(id)?.classList.remove('hidden'); }
 function hideElement(id)  { document.getElementById(id)?.classList.add('hidden'); }
 function hideLoading()    { hideElement('loading-screen'); }
+
+// =====================================================
+// ДИНАМИЧЕСКАЯ ТЕМА ПО ВРЕМЕНИ СУТОК
+// =====================================================
+function applyTimeTheme() {
+  const hour = new Date().getHours();
+  const body = document.body;
+  body.classList.remove('time-morning', 'time-day', 'time-evening', 'time-night');
+
+  if      (hour >= 5  && hour < 12) body.classList.add('time-morning');
+  else if (hour >= 12 && hour < 17) body.classList.add('time-day');
+  else if (hour >= 17 && hour < 22) body.classList.add('time-evening');
+  else                               body.classList.add('time-night');
+}
+
+// =====================================================
+// НЕДЕЛЬНАЯ СТАТИСТИКА (кастомный бар-чарт без Chart.js)
+// =====================================================
+async function loadWeekStats() {
+  try {
+    const res  = await apiFetch('/api/stats/weekly');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderWeekBars(data.weekly || []);
+  } catch (e) {}
+}
+
+function renderWeekBars(weekly) {
+  const barsEl   = document.getElementById('week-bars');
+  const labelsEl = document.getElementById('week-days-labels');
+  const countEl  = document.getElementById('week-practiced-count');
+  if (!barsEl || !labelsEl) return;
+
+  const DAY_SHORT = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+  const DIFF_BAR_COLORS = ['', '#6dbe6d','#f0c040','#f09040','#e05050'];
+
+  const practiced = weekly.filter(d => d.practiced).length;
+  if (countEl) countEl.textContent = `${practiced} из 7 дней`;
+
+  barsEl.innerHTML = weekly.map((day, i) => {
+    const color  = day.practiced ? DIFF_BAR_COLORS[day.difficulty] : 'var(--surface-2)';
+    // Высота бара: от 20% до 100% в зависимости от длительности (если есть), иначе фиксированная
+    const heightPct = day.practiced
+      ? (day.duration > 0 ? Math.min(100, 20 + Math.floor(day.duration / 36)) : 60)
+      : 15;
+
+    return `
+      <div class="week-bar-wrap">
+        <div class="week-bar" style="height:${heightPct}%; background:${color}; ${day.practiced ? `box-shadow: 0 4px 12px ${color}88` : ''}">
+          ${day.practiced ? '<div class="week-bar-shine"></div>' : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  labelsEl.innerHTML = weekly.map(day => {
+    const d       = new Date(day.date + 'T00:00:00');
+    const isToday = day.date === getTodayStr();
+    return `<div class="week-day-label ${isToday ? 'today-label' : ''}">${DAY_SHORT[d.getDay()]}</div>`;
+  }).join('');
+}
+
+// Обновляем статистику после каждой записи
+const _origQuickLog = quickLog;
 
 function toast(message) {
   const existing = document.querySelector('.toast');
