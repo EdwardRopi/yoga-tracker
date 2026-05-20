@@ -1,0 +1,2167 @@
+From c9afdc2d41e1be298438ffb46ed2f87d5ca5550a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 20 May 2026 08:16:05 +0000
+Subject: [PATCH 1/3] feat: add PWA offline support with Service Worker and
+ background sync
+
+- Service Worker caches static assets on install; network-first for API GETs
+- manifest.json and icon.svg enable PWA install prompt on mobile browsers
+- Offline practice logging queues sessions to localStorage and syncs automatically when network returns
+- Online/offline banner shows current connectivity status
+- processOfflineQueue runs on app start and on 'online' event for reliable sync
+
+https://claude.ai/code/session_01GnX385cSM8TFePkRcyYiKM
+---
+ frontend/app.js        | 69 ++++++++++++++++++++++++++++++++++++---
+ frontend/icon.svg      |  4 +++
+ frontend/index.html    | 10 ++++++
+ frontend/manifest.json | 20 ++++++++++++
+ frontend/styles.css    | 17 ++++++++++
+ frontend/sw.js         | 74 ++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 190 insertions(+), 4 deletions(-)
+ create mode 100644 frontend/icon.svg
+ create mode 100644 frontend/manifest.json
+ create mode 100644 frontend/sw.js
+
+diff --git a/frontend/app.js b/frontend/app.js
+index 57768e5..cd8239f 100644
+--- a/frontend/app.js
++++ b/frontend/app.js
+@@ -100,6 +100,17 @@ document.addEventListener('DOMContentLoaded', async () => {
+     if (state.token) { showApp(); return; }
+   }
+ 
++  // Service Worker + офлайн-индикатор
++  if ('serviceWorker' in navigator) {
++    navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW:', e));
++    navigator.serviceWorker.addEventListener('message', e => {
++      if (e.data?.type === 'FLUSH_QUEUE') processOfflineQueue();
++    });
++  }
++  window.addEventListener('online',  () => { hideElement('offline-banner'); processOfflineQueue(); });
++  window.addEventListener('offline', () => { showElement('offline-banner'); });
++  if (!navigator.onLine) showElement('offline-banner');
++
+   // Показываем экран авторизации
+   hideLoading();
+   // Показываем кнопки Telegram если мы внутри Telegram
+@@ -332,6 +343,9 @@ async function showApp() {
+   restoreTimer();
+   applyTimeTheme();
+   loadWeekStats();
++
++  // Синхронизируем накопленную офлайн-очередь
++  if (navigator.onLine) processOfflineQueue();
+ }
+ 
+ // =====================================================
+@@ -494,6 +508,22 @@ async function quickLog(difficulty) {
+   const type     = state.selectedType || 'general';
+   const duration = state.timerDuration || 0;
+ 
++  // Offline: сохраняем в очередь, делаем оптимистичное обновление UI
++  if (!navigator.onLine) {
++    const queue = JSON.parse(localStorage.getItem('yt_offline_queue') || '[]');
++    const idx   = queue.findIndex(s => s.date === today);
++    const entry = { date: today, difficulty, type, duration };
++    if (idx >= 0) queue[idx] = entry; else queue.push(entry);
++    localStorage.setItem('yt_offline_queue', JSON.stringify(queue));
++
++    updateTodayStatus(entry);
++    state.timerDuration = 0;
++    const label = document.getElementById('difficulty-label');
++    if (label) label.textContent = 'Как прошла практика сегодня?';
++    toast('Офлайн: сохранится при подключении 📵');
++    return;
++  }
++
+   try {
+     const res = await apiFetch('/api/yoga/sessions', {
+       method: 'POST',
+@@ -504,15 +534,11 @@ async function quickLog(difficulty) {
+       updateTodayStatus(data.session);
+       await loadStreak();
+ 
+-      // Сбрасываем состояние после логирования
+       state.timerDuration = 0;
+       const label = document.getElementById('difficulty-label');
+       if (label) label.textContent = 'Как прошла практика сегодня?';
+ 
+-      // Начисляем XP и проверяем достижения
+       awardXP(difficulty, duration);
+-
+-      // Обновляем недельный график
+       loadWeekStats();
+ 
+       toast(`Отмечено: ${DIFF_LABELS[difficulty]}`);
+@@ -1240,6 +1266,41 @@ function renderWeekBars(weekly) {
+   }).join('');
+ }
+ 
++// =====================================================
++// ОФЛАЙН-СИНХРОНИЗАЦИЯ
++// =====================================================
++async function processOfflineQueue() {
++  const queue = JSON.parse(localStorage.getItem('yt_offline_queue') || '[]');
++  if (!queue.length || !state.token) return;
++
++  let synced = 0;
++  for (const session of queue) {
++    try {
++      const res = await apiFetch('/api/yoga/sessions', {
++        method: 'POST',
++        body: JSON.stringify(session)
++      });
++      if (res.ok) {
++        synced++;
++        awardXP(session.difficulty, session.duration || 0);
++      } else {
++        break;
++      }
++    } catch (e) {
++      break; // Всё ещё нет сети — попробуем позже
++    }
++  }
++
++  if (synced > 0) {
++    localStorage.removeItem('yt_offline_queue');
++    await loadStreak();
++    loadWeekStats();
++    if (state.currentTab === 'calendar') loadCalendar();
++    const word = synced === 1 ? 'практика' : synced < 5 ? 'практики' : 'практик';
++    toast(`Синхронизировано: ${synced} ${word} ✓`);
++  }
++}
++
+ // Обновляем статистику после каждой записи
+ const _origQuickLog = quickLog;
+ 
+diff --git a/frontend/icon.svg b/frontend/icon.svg
+new file mode 100644
+index 0000000..7a9634c
+--- /dev/null
++++ b/frontend/icon.svg
+@@ -0,0 +1,4 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
++  <rect width="192" height="192" rx="40" fill="#c084fc"/>
++  <text x="96" y="140" font-size="100" text-anchor="middle">🧘</text>
++</svg>
+diff --git a/frontend/index.html b/frontend/index.html
+index 23aab52..f952912 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -4,12 +4,22 @@
+   <meta charset="UTF-8" />
+   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+   <title>🧘 Йога Трекер</title>
++  <link rel="manifest" href="/manifest.json" />
++  <meta name="theme-color" content="#c084fc" />
++  <meta name="apple-mobile-web-app-capable" content="yes" />
++  <meta name="apple-mobile-web-app-title" content="Йога Трекер" />
++  <link rel="apple-touch-icon" href="/icon.svg" />
+   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+   <link rel="stylesheet" href="styles.css" />
+ </head>
+ <body>
+ 
++  <!-- Офлайн-баннер -->
++  <div id="offline-banner" class="offline-banner hidden">
++    📵 Офлайн — данные сохранятся при подключении
++  </div>
++
+   <!-- ===== ЭКРАН ЗАГРУЗКИ ===== -->
+   <div id="loading-screen" class="loading-screen">
+     <div class="loading-logo">🧘</div>
+diff --git a/frontend/manifest.json b/frontend/manifest.json
+new file mode 100644
+index 0000000..cf079c3
+--- /dev/null
++++ b/frontend/manifest.json
+@@ -0,0 +1,20 @@
++{
++  "name": "Йога Трекер",
++  "short_name": "Йога",
++  "description": "Личный дневник практики йоги",
++  "start_url": "/",
++  "scope": "/",
++  "display": "standalone",
++  "background_color": "#fdf4ff",
++  "theme_color": "#c084fc",
++  "orientation": "portrait-primary",
++  "lang": "ru",
++  "icons": [
++    {
++      "src": "/icon.svg",
++      "sizes": "any",
++      "type": "image/svg+xml",
++      "purpose": "any"
++    }
++  ]
++}
+diff --git a/frontend/styles.css b/frontend/styles.css
+index be7235a..9011b5e 100644
+--- a/frontend/styles.css
++++ b/frontend/styles.css
+@@ -1278,3 +1278,20 @@ button:active:not(:disabled) {
+ .ach-label { font-size: 10px; color: var(--primary); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+ .ach-name  { font-size: 15px; font-weight: 800; color: var(--text); }
+ .ach-desc  { font-size: 12px; color: var(--text-secondary); }
++
++/* =====================================================
++   ОФЛАЙН-БАННЕР
++   ===================================================== */
++.offline-banner {
++  position: fixed;
++  top: 0; left: 0; right: 0;
++  z-index: 9999;
++  background: #f09040;
++  color: #fff;
++  text-align: center;
++  padding: 8px 16px;
++  font-size: 13px;
++  font-weight: 600;
++  letter-spacing: 0.01em;
++  box-shadow: 0 2px 8px rgba(240,144,64,0.4);
++}
+diff --git a/frontend/sw.js b/frontend/sw.js
+new file mode 100644
+index 0000000..5f0b9a7
+--- /dev/null
++++ b/frontend/sw.js
+@@ -0,0 +1,74 @@
++/* =====================================================
++   YOGA TRACKER — Service Worker
++   Strategies:
++   - Static assets: Cache-First (update in background)
++   - API GETs:      Network-First with cache fallback
++   - API mutations: Pass through (handled by offline queue in app.js)
++   ===================================================== */
++
++const CACHE = 'yoga-v1';
++const PRECACHE = ['/', '/app.js', '/styles.css', '/manifest.json', '/icon.svg'];
++
++self.addEventListener('install', e => {
++  e.waitUntil(
++    caches.open(CACHE)
++      .then(c => c.addAll(PRECACHE))
++      .then(() => self.skipWaiting())
++  );
++});
++
++self.addEventListener('activate', e => {
++  e.waitUntil(
++    caches.keys()
++      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
++      .then(() => self.clients.claim())
++  );
++});
++
++self.addEventListener('fetch', e => {
++  const { request } = e;
++  const url = new URL(request.url);
++
++  // Skip cross-origin requests (Telegram SDK, Chart.js CDN)
++  if (url.origin !== self.location.origin) return;
++
++  // API GET: network-first, fall back to cache
++  if (url.pathname.startsWith('/api/') && request.method === 'GET') {
++    e.respondWith(
++      fetch(request)
++        .then(res => {
++          if (res.ok) {
++            caches.open(CACHE).then(c => c.put(request, res.clone()));
++          }
++          return res;
++        })
++        .catch(() => caches.match(request))
++    );
++    return;
++  }
++
++  // API mutations (POST/DELETE): let through — app.js queues them offline
++  if (url.pathname.startsWith('/api/')) return;
++
++  // Static assets: cache-first, network fallback
++  e.respondWith(
++    caches.match(request).then(cached => {
++      const network = fetch(request).then(res => {
++        if (res.ok) caches.open(CACHE).then(c => c.put(request, res.clone()));
++        return res;
++      });
++      return cached || network;
++    })
++  );
++});
++
++// Background Sync: tell the app to flush its offline queue
++self.addEventListener('sync', e => {
++  if (e.tag === 'sync-sessions') {
++    e.waitUntil(
++      self.clients.matchAll().then(clients =>
++        clients.forEach(c => c.postMessage({ type: 'FLUSH_QUEUE' }))
++      )
++    );
++  }
++});
+-- 
+2.43.0
+
+
+From 944cbc2eec1dbe8bda4b661ee14c6d90061371ed Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 20 May 2026 08:31:41 +0000
+Subject: [PATCH 2/3] fix: register Service Worker before token check so it
+ runs for all users
+
+Previously SW registration was placed after the early-return for valid tokens,
+meaning returning users never got the offline cache installed.
+
+https://claude.ai/code/session_01GnX385cSM8TFePkRcyYiKM
+---
+ frontend/app.js | 22 +++++++++++-----------
+ 1 file changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/frontend/app.js b/frontend/app.js
+index cd8239f..e7b9677 100644
+--- a/frontend/app.js
++++ b/frontend/app.js
+@@ -74,6 +74,17 @@ const WEEKDAYS_SHORT = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+ // ИНИЦИАЛИЗАЦИЯ
+ // =====================================================
+ document.addEventListener('DOMContentLoaded', async () => {
++  // Service Worker + офлайн-индикатор (регистрируем всегда, до проверки токена)
++  if ('serviceWorker' in navigator) {
++    navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW:', e));
++    navigator.serviceWorker.addEventListener('message', e => {
++      if (e.data?.type === 'FLUSH_QUEUE') processOfflineQueue();
++    });
++  }
++  window.addEventListener('online',  () => { hideElement('offline-banner'); processOfflineQueue(); });
++  window.addEventListener('offline', () => { showElement('offline-banner'); });
++  if (!navigator.onLine) showElement('offline-banner');
++
+   // Пытаемся восстановить сессию из localStorage
+   state.token = localStorage.getItem('yt_token');
+   const savedUser = localStorage.getItem('yt_user');
+@@ -100,17 +111,6 @@ document.addEventListener('DOMContentLoaded', async () => {
+     if (state.token) { showApp(); return; }
+   }
+ 
+-  // Service Worker + офлайн-индикатор
+-  if ('serviceWorker' in navigator) {
+-    navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW:', e));
+-    navigator.serviceWorker.addEventListener('message', e => {
+-      if (e.data?.type === 'FLUSH_QUEUE') processOfflineQueue();
+-    });
+-  }
+-  window.addEventListener('online',  () => { hideElement('offline-banner'); processOfflineQueue(); });
+-  window.addEventListener('offline', () => { showElement('offline-banner'); });
+-  if (!navigator.onLine) showElement('offline-banner');
+-
+   // Показываем экран авторизации
+   hideLoading();
+   // Показываем кнопки Telegram если мы внутри Telegram
+-- 
+2.43.0
+
+
+From 1532cf556f9f20572237f29fe6361c9e31630496 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 20 May 2026 13:36:05 +0000
+Subject: [PATCH 3/3] feat: add training program generator with 100 yoga poses
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- poses.js: 100 yoga poses with metadata (energy, difficulty, time-of-day,
+  intensity, phase) and stick-figure parameters for SVG rendering
+- pose-svg.js: parameterized stick-figure SVG renderer (single function
+  generates any pose from joint angles, ~3KB total)
+- Program generator: 3-step builder (time / intensity / duration) produces
+  warmup → main → cooldown sequence with no duplicates, ordered by category
+- Guided mode: full-screen practice with circular timer, breath cue,
+  pose name, next pose preview
+- Recent programs saved to localStorage; auto-logs as yoga session on finish
+- Updates Service Worker cache to v2 to include new assets
+---
+ frontend/app.js      | 422 ++++++++++++++++++++++++++++-
+ frontend/index.html  | 164 ++++++++++++
+ frontend/pose-svg.js |  93 +++++++
+ frontend/poses.js    | 618 +++++++++++++++++++++++++++++++++++++++++++
+ frontend/styles.css  | 396 +++++++++++++++++++++++++++
+ frontend/sw.js       |   4 +-
+ 6 files changed, 1693 insertions(+), 4 deletions(-)
+ create mode 100644 frontend/pose-svg.js
+ create mode 100644 frontend/poses.js
+
+diff --git a/frontend/app.js b/frontend/app.js
+index e7b9677..c8e62ca 100644
+--- a/frontend/app.js
++++ b/frontend/app.js
+@@ -1058,6 +1058,7 @@ let breathingState = {
+ 
+ function loadPracticeTab() {
+   loadPrograms();
++  if (typeof renderRecentPrograms === 'function') renderRecentPrograms();
+ }
+ 
+ function startBreathing(key) {
+@@ -1301,8 +1302,425 @@ async function processOfflineQueue() {
+   }
+ }
+ 
+-// Обновляем статистику после каждой записи
+-const _origQuickLog = quickLog;
++// =====================================================
++// ГЕНЕРАТОР ПРОГРАММ
++// =====================================================
++
++const builderState = {
++  timeOfDay: null,
++  intensity: null,
++  duration:  null,
++};
++
++const programState = {
++  current:   null,   // последняя сгенерированная программа
++  guided:    {
++    poseIdx:    0,
++    remaining:  0,
++    interval:   null,
++    paused:     false,
++    startedAt:  0,
++  },
++};
++
++function autoTimeOfDay() {
++  const h = new Date().getHours();
++  if (h >= 5  && h < 11) return 'morning';
++  if (h >= 11 && h < 18) return 'day';
++  return 'evening';
++}
++
++function openProgramBuilder() {
++  // Сбрасываем выбор
++  builderState.timeOfDay = null;
++  builderState.intensity = null;
++  builderState.duration  = null;
++  document.querySelectorAll('.builder-option').forEach(b => b.classList.remove('builder-selected'));
++  document.getElementById('builder-generate').disabled = true;
++
++  // Автоматический выбор времени суток
++  const auto = autoTimeOfDay();
++  const autoBtn = document.querySelector(`.builder-option[data-key="timeOfDay"][data-value="${auto}"]`);
++  if (autoBtn) {
++    autoBtn.classList.add('builder-selected');
++    builderState.timeOfDay = auto;
++  }
++
++  showElement('program-builder');
++}
++
++function closeProgramBuilder() {
++  hideElement('program-builder');
++}
++
++function builderSelect(btn) {
++  const key   = btn.dataset.key;
++  const value = btn.dataset.value;
++
++  // Снимаем выбор у соседей того же ключа
++  document.querySelectorAll(`.builder-option[data-key="${key}"]`)
++    .forEach(b => b.classList.remove('builder-selected'));
++  btn.classList.add('builder-selected');
++
++  builderState[key] = key === 'duration' ? parseInt(value) : value;
++
++  // Активируем кнопку «Сгенерировать» если все 3 шага выбраны
++  const ready = builderState.timeOfDay && builderState.intensity && builderState.duration;
++  document.getElementById('builder-generate').disabled = !ready;
++}
++
++// === Алгоритм генерации программы ===
++const STRUCTURE = {
++  15: { total: 8,  warmup: 2, cooldown: 1 },
++  30: { total: 14, warmup: 3, cooldown: 2 },
++  45: { total: 18, warmup: 3, cooldown: 2 },
++  60: { total: 23, warmup: 4, cooldown: 2 },
++};
++
++function shuffle(arr) {
++  const a = [...arr];
++  for (let i = a.length - 1; i > 0; i--) {
++    const j = Math.floor(Math.random() * (i + 1));
++    [a[i], a[j]] = [a[j], a[i]];
++  }
++  return a;
++}
++
++function pickPoses(pool, phase, count, intensity, excludeIds) {
++  const exclude = new Set(excludeIds || []);
++  const phasePool = pool.filter(p => p.phase.includes(phase) && !exclude.has(p.id));
++  const sorted = [...phasePool].sort((a, b) => {
++    if (intensity === 'intensive')  return b.difficulty - a.difficulty;
++    if (intensity === 'relaxing')   return a.energy - b.energy;
++    if (intensity === 'meditative') return b.duration_hint - a.duration_hint;
++    return 0;
++  });
++  const topN = sorted.slice(0, Math.max(count * 2, 6));
++  const picked = shuffle(topN).slice(0, count);
++
++  // Если не хватает — добираем из всего фазного пула (без exclude)
++  for (const p of phasePool) {
++    if (picked.length >= count) break;
++    if (!picked.some(x => x.id === p.id)) picked.push(p);
++  }
++  return picked;
++}
++
++// Сортировка основных поз: стоячие → пол → перевёрнутые → баланс
++const CATEGORY_ORDER = { standing:1, balance:2, prone:3, seated:4, supine:5, inverted:6, breathing:0 };
++
++function orderMainPoses(poses) {
++  return [...poses].sort((a, b) => {
++    const ca = CATEGORY_ORDER[a.category] ?? 9;
++    const cb = CATEGORY_ORDER[b.category] ?? 9;
++    if (ca !== cb) return ca - cb;
++    return a.difficulty - b.difficulty;
++  });
++}
++
++function generateProgram({ timeOfDay, intensity, duration }) {
++  const suitable = POSES.filter(p =>
++    p.time_of_day.includes(timeOfDay) &&
++    p.intensity.includes(intensity)
++  );
++  if (suitable.length === 0) return null;
++
++  const S = STRUCTURE[duration];
++  const mainCount = S.total - S.warmup - S.cooldown;
++
++  const warmup = pickPoses(suitable, 'warmup', S.warmup, intensity, []);
++  const usedAfterWarmup = warmup.map(p => p.id);
++
++  const main = orderMainPoses(
++    pickPoses(suitable, 'main', mainCount, intensity, usedAfterWarmup)
++  );
++  const usedAfterMain = [...usedAfterWarmup, ...main.map(p => p.id)];
++
++  const cooldown = pickPoses(suitable, 'cooldown', S.cooldown, intensity, usedAfterMain);
++
++  // Шавасана в конец, если её нет
++  const savasana = POSES.find(p => p.id === 'savasana');
++  if (savasana && intensity !== 'intensive' && !cooldown.some(p => p.id === 'savasana')) {
++    cooldown[cooldown.length - 1] = savasana;
++  }
++
++  const sequence = [...warmup, ...main, ...cooldown];
++
++  // Распределение времени
++  const total = duration * 60;
++  const warmupSec   = 45;
++  const cooldownSec = duration >= 45 ? 120 : 90;
++  const mainTotal   = total - (warmupSec * S.warmup) - (cooldownSec * S.cooldown);
++  const mainPerPose = Math.max(45, Math.floor(mainTotal / mainCount));
++
++  const timed = sequence.map((pose, i) => {
++    let sec, phase;
++    if (i < S.warmup) {
++      sec = warmupSec; phase = 'warmup';
++    } else if (i >= sequence.length - S.cooldown) {
++      sec = cooldownSec; phase = 'cooldown';
++    } else {
++      sec = mainPerPose; phase = 'main';
++    }
++    return { ...pose, assigned_seconds: sec, phase_in_program: phase };
++  });
++
++  return {
++    id:        Date.now(),
++    timeOfDay, intensity, duration,
++    poses:     timed,
++    createdAt: new Date().toISOString(),
++  };
++}
++
++const TIME_LABELS      = { morning:'Утренняя',   day:'Дневная',     evening:'Вечерняя' };
++const INTENSITY_LABELS = { intensive:'Интенсивная', relaxing:'Расслабляющая', meditative:'Медитативная' };
++const TIME_EMOJIS      = { morning:'🌅', day:'☀️', evening:'🌙' };
++const INTENSITY_EMOJIS = { intensive:'💪', relaxing:'🌿', meditative:'🧘' };
++const PHASE_LABELS     = { warmup:'РАЗОГРЕВ', main:'ОСНОВНАЯ', cooldown:'ЗАВЕРШЕНИЕ' };
++
++function generateAndShowProgram() {
++  if (!builderState.timeOfDay || !builderState.intensity || !builderState.duration) return;
++  const prog = generateProgram(builderState);
++  if (!prog) { toast('Не удалось подобрать позы'); return; }
++
++  programState.current = prog;
++  saveRecentProgram(prog);
++  closeProgramBuilder();
++  showProgramView(prog);
++}
++
++function showProgramView(prog) {
++  document.getElementById('program-view-title').textContent =
++    `${TIME_EMOJIS[prog.timeOfDay]} ${TIME_LABELS[prog.timeOfDay]}`;
++
++  document.getElementById('program-meta').innerHTML = `
++    <span class="program-meta-chip">${INTENSITY_EMOJIS[prog.intensity]} ${INTENSITY_LABELS[prog.intensity]}</span>
++    <span class="program-meta-chip">⏱ ${prog.duration} мин</span>
++    <span class="program-meta-chip">🧘 ${prog.poses.length} поз</span>
++  `;
++
++  const list = document.getElementById('program-poses-list');
++  list.innerHTML = prog.poses.map((p, i) => {
++    const mins = Math.floor(p.assigned_seconds / 60);
++    const secs = p.assigned_seconds % 60;
++    const time = mins > 0 ? `${mins}м ${secs}с` : `${secs}с`;
++    return `
++      <div class="program-pose-row">
++        <div class="program-pose-num">${i + 1}</div>
++        <div class="program-pose-svg">${renderPoseSVG(p, { size: 44 })}</div>
++        <div class="program-pose-info">
++          <div class="program-pose-name">${p.name_ru}</div>
++          <div class="program-pose-time">${time}</div>
++        </div>
++        <div class="program-pose-phase phase-${p.phase_in_program}">${PHASE_LABELS[p.phase_in_program]}</div>
++      </div>
++    `;
++  }).join('');
++
++  showElement('program-view');
++}
++
++function closeProgramView() {
++  hideElement('program-view');
++}
++
++function regenerateProgram() {
++  if (!programState.current) return;
++  const prog = generateProgram({
++    timeOfDay: programState.current.timeOfDay,
++    intensity: programState.current.intensity,
++    duration:  programState.current.duration,
++  });
++  if (!prog) return;
++  programState.current = prog;
++  saveRecentProgram(prog);
++  showProgramView(prog);
++  toast('Программа обновлена ↺');
++}
++
++// === Сохранение последних программ ===
++function saveRecentProgram(prog) {
++  try {
++    const stored = JSON.parse(localStorage.getItem('yt_programs') || '[]');
++    stored.unshift({
++      id: prog.id, timeOfDay: prog.timeOfDay, intensity: prog.intensity,
++      duration: prog.duration, poses: prog.poses, createdAt: prog.createdAt,
++      completed: false,
++    });
++    localStorage.setItem('yt_programs', JSON.stringify(stored.slice(0, 10)));
++  } catch (e) {}
++  renderRecentPrograms();
++}
++
++function renderRecentPrograms() {
++  const container = document.getElementById('recent-programs');
++  if (!container) return;
++  const stored = JSON.parse(localStorage.getItem('yt_programs') || '[]');
++  if (!stored.length) { container.classList.add('hidden'); return; }
++  container.classList.remove('hidden');
++  container.innerHTML = stored.slice(0, 3).map(p => `
++    <div class="recent-program-chip" onclick="reopenRecentProgram(${p.id})">
++      <span>${TIME_EMOJIS[p.timeOfDay]} ${INTENSITY_EMOJIS[p.intensity]}</span>
++      <span class="recent-program-chip-meta">${INTENSITY_LABELS[p.intensity]} · ${p.duration} мин</span>
++      <span>${p.completed ? '✓' : '▶'}</span>
++    </div>
++  `).join('');
++}
++
++function reopenRecentProgram(id) {
++  const stored = JSON.parse(localStorage.getItem('yt_programs') || '[]');
++  const prog = stored.find(p => p.id === id);
++  if (!prog) return;
++  programState.current = prog;
++  showProgramView(prog);
++}
++
++// =====================================================
++// РЕЖИМ ГИДА
++// =====================================================
++function startGuidedMode() {
++  if (!programState.current) return;
++  programState.guided.poseIdx   = 0;
++  programState.guided.paused    = false;
++  programState.guided.startedAt = Date.now();
++  hideElement('program-view');
++  showElement('guided-mode');
++  renderGuidedPose();
++  startGuidedTimer();
++}
++
++function renderGuidedPose() {
++  const prog = programState.current;
++  const idx  = programState.guided.poseIdx;
++  const pose = prog.poses[idx];
++
++  document.getElementById('guided-position').textContent = `${idx + 1} / ${prog.poses.length}`;
++  document.getElementById('guided-progress-fill').style.width =
++    `${((idx) / prog.poses.length) * 100}%`;
++
++  document.getElementById('guided-pose-svg').innerHTML = renderPoseSVG(pose, { size: 180 });
++  document.getElementById('guided-pose-name').textContent    = pose.name_ru;
++  document.getElementById('guided-pose-name-en').textContent = pose.name_en;
++  document.getElementById('guided-breath').textContent       = pose.breath || '';
++
++  // Следующая поза
++  const next = prog.poses[idx + 1];
++  const nextBox = document.getElementById('guided-next');
++  if (next) {
++    nextBox.classList.remove('hidden');
++    document.getElementById('guided-next-svg').innerHTML  = renderPoseSVG(next, { size: 32 });
++    document.getElementById('guided-next-name').textContent = next.name_ru;
++  } else {
++    nextBox.classList.add('hidden');
++  }
++
++  programState.guided.remaining = pose.assigned_seconds;
++  updateGuidedTimerDisplay();
++}
++
++function startGuidedTimer() {
++  if (programState.guided.interval) clearInterval(programState.guided.interval);
++  programState.guided.interval = setInterval(() => {
++    if (programState.guided.paused) return;
++    programState.guided.remaining--;
++    updateGuidedTimerDisplay();
++    if (programState.guided.remaining <= 0) {
++      advanceGuidedPose();
++    }
++  }, 1000);
++}
++
++function updateGuidedTimerDisplay() {
++  const sec = Math.max(0, programState.guided.remaining);
++  const mins = Math.floor(sec / 60);
++  const secs = sec % 60;
++  document.getElementById('guided-timer-text').textContent =
++    `${mins}:${String(secs).padStart(2,'0')}`;
++
++  const total   = programState.current.poses[programState.guided.poseIdx].assigned_seconds;
++  const ratio   = sec / total;
++  const dashLen = 289;
++  document.getElementById('guided-ring-fg').style.strokeDashoffset = dashLen * (1 - ratio);
++}
++
++function advanceGuidedPose() {
++  const prog = programState.current;
++  programState.guided.poseIdx++;
++  if (programState.guided.poseIdx >= prog.poses.length) {
++    finishGuidedMode();
++    return;
++  }
++  renderGuidedPose();
++}
++
++function guidedSkip() {
++  advanceGuidedPose();
++}
++
++function guidedPauseToggle() {
++  programState.guided.paused = !programState.guided.paused;
++  document.getElementById('guided-pause-btn').textContent =
++    programState.guided.paused ? '▶' : '⏸';
++}
++
++function exitGuidedMode() {
++  if (!confirm('Завершить тренировку?')) return;
++  clearInterval(programState.guided.interval);
++  programState.guided.interval = null;
++  hideElement('guided-mode');
++}
++
++function finishGuidedMode() {
++  clearInterval(programState.guided.interval);
++  programState.guided.interval = null;
++  hideElement('guided-mode');
++
++  const prog = programState.current;
++  const elapsed = Math.floor((Date.now() - programState.guided.startedAt) / 1000);
++  const mins = Math.floor(elapsed / 60);
++
++  // Помечаем завершённой в истории
++  try {
++    const stored = JSON.parse(localStorage.getItem('yt_programs') || '[]');
++    const p = stored.find(x => x.id === prog.id);
++    if (p) { p.completed = true; p.completedAt = new Date().toISOString(); }
++    localStorage.setItem('yt_programs', JSON.stringify(stored));
++  } catch (e) {}
++
++  // Логируем как сессию йоги (получаем XP, обновляем стрик)
++  const today = getTodayStr();
++  const diff  = prog.intensity === 'intensive' ? 3 :
++                prog.intensity === 'relaxing'  ? 2 : 1;
++  const type  = prog.intensity === 'intensive'  ? 'vinyasa' :
++                prog.intensity === 'meditative' ? 'meditation' : 'yin';
++  apiFetch('/api/yoga/sessions', {
++    method: 'POST',
++    body: JSON.stringify({ date: today, difficulty: diff, type, duration: elapsed })
++  }).then(() => {
++    awardXP(diff, elapsed);
++    loadStreak();
++    loadWeekStats();
++  }).catch(() => {});
++
++  // Экран завершения
++  document.getElementById('finish-stats').innerHTML = `
++    <div class="finish-stat"><span class="finish-stat-val">${mins}</span><span>минут</span></div>
++    <div class="finish-stat"><span class="finish-stat-val">${prog.poses.length}</span><span>поз</span></div>
++    <div class="finish-stat"><span class="finish-stat-val">+${prog.poses.length * 5}</span><span>XP</span></div>
++  `;
++  showElement('program-finish');
++  renderRecentPrograms();
++}
++
++function restartProgram() {
++  hideElement('program-finish');
++  if (programState.current) startGuidedMode();
++}
++
++function exitFinishScreen() {
++  hideElement('program-finish');
++}
+ 
+ function toast(message) {
+   const existing = document.querySelector('.toast');
+diff --git a/frontend/index.html b/frontend/index.html
+index f952912..9d55ced 100644
+--- a/frontend/index.html
++++ b/frontend/index.html
+@@ -227,6 +227,18 @@
+           <p class="notes-subtitle">Дыхание и программы 🌿</p>
+         </div>
+ 
++        <!-- ГЕНЕРАТОР ПРОГРАММЫ -->
++        <div class="card generator-entry-card">
++          <div class="generator-entry-top">
++            <div>
++              <div class="generator-entry-title">✨ Создай программу</div>
++              <div class="generator-entry-desc">Подбор поз под цель и время</div>
++            </div>
++            <button class="btn-start-program" onclick="openProgramBuilder()">Создать</button>
++          </div>
++          <div id="recent-programs" class="recent-programs hidden"></div>
++        </div>
++
+         <!-- Выбор техники (показывается когда нет активного дыхания) -->
+         <div id="breathing-choose">
+           <div class="section-label">💨 Дыхательные упражнения</div>
+@@ -383,6 +395,158 @@
+ 
+   </div><!-- end app -->
+ 
++  <!-- =============================================== -->
++  <!-- ГЕНЕРАТОР ПРОГРАММЫ — ШАГИ ВЫБОРА -->
++  <!-- =============================================== -->
++  <div id="program-builder" class="overlay-screen hidden">
++    <div class="overlay-header">
++      <button class="overlay-back" onclick="closeProgramBuilder()">✕</button>
++      <span class="overlay-title">Создай программу</span>
++    </div>
++    <div class="overlay-content builder-content">
++
++      <div class="builder-step">
++        <div class="builder-step-label">1 · Время суток</div>
++        <div class="builder-options builder-options-3">
++          <button class="builder-option" data-key="timeOfDay" data-value="morning" onclick="builderSelect(this)">
++            <span class="builder-emoji">🌅</span>
++            <span class="builder-name">Утренняя</span>
++            <span class="builder-sub">6–11</span>
++          </button>
++          <button class="builder-option" data-key="timeOfDay" data-value="day" onclick="builderSelect(this)">
++            <span class="builder-emoji">☀️</span>
++            <span class="builder-name">Дневная</span>
++            <span class="builder-sub">11–18</span>
++          </button>
++          <button class="builder-option" data-key="timeOfDay" data-value="evening" onclick="builderSelect(this)">
++            <span class="builder-emoji">🌙</span>
++            <span class="builder-name">Вечерняя</span>
++            <span class="builder-sub">18–23</span>
++          </button>
++        </div>
++      </div>
++
++      <div class="builder-step">
++        <div class="builder-step-label">2 · Интенсивность</div>
++        <div class="builder-options builder-options-3">
++          <button class="builder-option" data-key="intensity" data-value="intensive" onclick="builderSelect(this)">
++            <span class="builder-emoji">💪</span>
++            <span class="builder-name">Интенсивная</span>
++            <span class="builder-sub">пульс ↑</span>
++          </button>
++          <button class="builder-option" data-key="intensity" data-value="relaxing" onclick="builderSelect(this)">
++            <span class="builder-emoji">🌿</span>
++            <span class="builder-name">Расслабляющая</span>
++            <span class="builder-sub">растяжка</span>
++          </button>
++          <button class="builder-option" data-key="intensity" data-value="meditative" onclick="builderSelect(this)">
++            <span class="builder-emoji">🧘</span>
++            <span class="builder-name">Медитативная</span>
++            <span class="builder-sub">внутрь</span>
++          </button>
++        </div>
++      </div>
++
++      <div class="builder-step">
++        <div class="builder-step-label">3 · Длительность</div>
++        <div class="builder-options builder-options-4">
++          <button class="builder-option builder-option-small" data-key="duration" data-value="15" onclick="builderSelect(this)">
++            <span class="builder-name">15</span><span class="builder-sub">мин</span>
++          </button>
++          <button class="builder-option builder-option-small" data-key="duration" data-value="30" onclick="builderSelect(this)">
++            <span class="builder-name">30</span><span class="builder-sub">мин</span>
++          </button>
++          <button class="builder-option builder-option-small" data-key="duration" data-value="45" onclick="builderSelect(this)">
++            <span class="builder-name">45</span><span class="builder-sub">мин</span>
++          </button>
++          <button class="builder-option builder-option-small" data-key="duration" data-value="60" onclick="builderSelect(this)">
++            <span class="builder-name">60</span><span class="builder-sub">мин</span>
++          </button>
++        </div>
++      </div>
++
++      <button id="builder-generate" class="btn-primary" onclick="generateAndShowProgram()" disabled>
++        ✨ Сгенерировать
++      </button>
++    </div>
++  </div>
++
++  <!-- =============================================== -->
++  <!-- ПРОГРАММА: СПИСОК ПОЗ -->
++  <!-- =============================================== -->
++  <div id="program-view" class="overlay-screen hidden">
++    <div class="overlay-header">
++      <button class="overlay-back" onclick="closeProgramView()">←</button>
++      <span class="overlay-title" id="program-view-title">Программа</span>
++      <button class="overlay-action" onclick="regenerateProgram()" title="Пересоздать">↺</button>
++    </div>
++    <div class="overlay-content program-view-content">
++      <div class="program-meta" id="program-meta"></div>
++      <button class="btn-primary btn-start-guided" onclick="startGuidedMode()">▶ Начать тренировку</button>
++      <div id="program-poses-list" class="program-poses-list"></div>
++    </div>
++  </div>
++
++  <!-- =============================================== -->
++  <!-- РЕЖИМ ГИДА — ПОЛНОЭКРАННАЯ ПРАКТИКА -->
++  <!-- =============================================== -->
++  <div id="guided-mode" class="overlay-screen guided-screen hidden">
++    <div class="guided-header">
++      <button class="guided-close" onclick="exitGuidedMode()">✕</button>
++      <div class="guided-progress">
++        <span id="guided-position">1 / 14</span>
++        <div class="guided-progress-bar">
++          <div id="guided-progress-fill" class="guided-progress-fill"></div>
++        </div>
++      </div>
++    </div>
++
++    <div class="guided-body">
++      <div id="guided-pose-svg" class="guided-pose-svg"></div>
++      <div class="guided-pose-name" id="guided-pose-name"></div>
++      <div class="guided-pose-name-en" id="guided-pose-name-en"></div>
++      <div class="guided-breath" id="guided-breath"></div>
++
++      <div class="guided-timer-ring">
++        <svg class="guided-ring-svg" viewBox="0 0 100 100">
++          <circle class="guided-ring-bg" cx="50" cy="50" r="46" />
++          <circle id="guided-ring-fg" class="guided-ring-fg" cx="50" cy="50" r="46" />
++        </svg>
++        <div class="guided-timer-text" id="guided-timer-text">0:00</div>
++      </div>
++
++      <div id="guided-next" class="guided-next hidden">
++        <div class="guided-next-label">Следующая</div>
++        <div class="guided-next-inner">
++          <div id="guided-next-svg" class="guided-next-svg"></div>
++          <div class="guided-next-name" id="guided-next-name"></div>
++        </div>
++      </div>
++    </div>
++
++    <div class="guided-controls">
++      <button class="guided-btn" onclick="guidedPauseToggle()" id="guided-pause-btn">⏸</button>
++      <button class="guided-btn guided-btn-skip" onclick="guidedSkip()">⏭</button>
++    </div>
++  </div>
++
++  <!-- =============================================== -->
++  <!-- ЗАВЕРШЕНИЕ ТРЕНИРОВКИ -->
++  <!-- =============================================== -->
++  <div id="program-finish" class="overlay-screen hidden">
++    <div class="finish-content">
++      <div class="finish-emoji">🎉</div>
++      <h2 class="finish-title">Тренировка завершена!</h2>
++      <div class="finish-stats" id="finish-stats"></div>
++      <div class="finish-actions">
++        <button class="btn-primary" onclick="restartProgram()">Ещё раз</button>
++        <button class="btn-ghost" onclick="exitFinishScreen()">В меню</button>
++      </div>
++    </div>
++  </div>
++
++  <script src="poses.js"></script>
++  <script src="pose-svg.js"></script>
+   <script src="app.js"></script>
+ </body>
+ </html>
+diff --git a/frontend/pose-svg.js b/frontend/pose-svg.js
+new file mode 100644
+index 0000000..4cbcde2
+--- /dev/null
++++ b/frontend/pose-svg.js
+@@ -0,0 +1,93 @@
++/* =====================================================
++   YOGA TRACKER — Stick Figure SVG Engine
++   Рендер позы из параметров figure: {base, torso, arms, legs, ...}
++   Углы в мире: 0 = вверх, 90 = вправо, 180 = вниз, 270 = влево
++   ===================================================== */
++
++function polarFrom(origin, angleDeg, length) {
++  const rad = (angleDeg * Math.PI) / 180;
++  return {
++    x: origin.x + length * Math.sin(rad),
++    y: origin.y - length * Math.cos(rad),
++  };
++}
++
++const POSE_BASES = {
++  stand:     { px: 50, py: 60,  torso: 0   },
++  sit:       { px: 50, py: 78,  torso: 0   },
++  kneel:     { px: 50, py: 70,  torso: 0   },
++  forward:   { px: 38, py: 60,  torso: 95  },
++  invert:    { px: 50, py: 40,  torso: 180 },
++  backbend:  { px: 50, py: 65,  torso: -25 },
++  prone:     { px: 30, py: 78,  torso: 90  },
++  supine:    { px: 30, py: 82,  torso: 90  },
++  sideplank: { px: 25, py: 75,  torso: 65  },
++  hands:     { px: 50, py: 75,  torso: 180 },
++  lunge:     { px: 50, py: 65,  torso: 0   },
++  child:     { px: 35, py: 78,  torso: 110 },
++};
++
++function renderPoseSVG(pose, opts = {}) {
++  const size  = opts.size  || 100;
++  const color = opts.color || 'currentColor';
++  const W = size, H = size * 1.2;
++  const k = size / 100;
++
++  const HEAD_R     = 5    * k;
++  const TORSO_LEN  = 22   * k;
++  const UPPER_ARM  = 13   * k;
++  const FOREARM    = 12   * k;
++  const THIGH      = 17   * k;
++  const SHIN       = 16   * k;
++  const FOOT       = 5    * k;
++
++  const fig = pose.figure || pose;
++  const base = POSE_BASES[fig.base] || POSE_BASES.stand;
++  const px = (fig.px !== undefined ? fig.px : base.px) + (fig.dx || 0);
++  const py = (fig.py !== undefined ? fig.py : base.py) + (fig.dy || 0);
++  const pelvis = { x: px * k, y: py * k };
++  const torsoAngle = fig.torso !== undefined ? fig.torso : base.torso;
++
++  const neck = polarFrom(pelvis, torsoAngle, TORSO_LEN);
++  const headDir = torsoAngle + (fig.head || 0);
++  const head = polarFrom(neck, headDir, HEAD_R * 1.6);
++
++  // Руки: [плечо_угол, предплечье_угол] — оба в мировых координатах
++  const la = fig.la || [torsoAngle + 180, torsoAngle + 180];
++  const ra = fig.ra || [torsoAngle + 180, torsoAngle + 180];
++  const leftElbow  = polarFrom(neck, la[0], UPPER_ARM);
++  const leftHand   = polarFrom(leftElbow, la[1], FOREARM);
++  const rightElbow = polarFrom(neck, ra[0], UPPER_ARM);
++  const rightHand  = polarFrom(rightElbow, ra[1], FOREARM);
++
++  // Ноги: [бедро_угол, голень_угол]
++  const ll = fig.ll || [180, 180];
++  const rl = fig.rl || [180, 180];
++  const leftKnee  = polarFrom(pelvis, ll[0], THIGH);
++  const leftFoot  = polarFrom(leftKnee, ll[1], SHIN);
++  const rightKnee = polarFrom(pelvis, rl[0], THIGH);
++  const rightFoot = polarFrom(rightKnee, rl[1], SHIN);
++
++  const SW = (2.8 * k).toFixed(2);
++  const SWL = (2.4 * k).toFixed(2);
++  const baseAttr = `stroke="${color}" stroke-linecap="round" fill="none"`;
++  const front = `${baseAttr} stroke-width="${SW}"`;
++  const back  = `${baseAttr} stroke-width="${SWL}" stroke-opacity="0.55"`;
++
++  function L(a, b, attr) {
++    return `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" ${attr}/>`;
++  }
++
++  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" class="pose-svg">
++    ${L(pelvis, neck, front)}
++    <circle cx="${head.x.toFixed(1)}" cy="${head.y.toFixed(1)}" r="${HEAD_R}" stroke="${color}" stroke-width="${SWL}" fill="none"/>
++    ${L(neck, leftElbow, back)}
++    ${L(leftElbow, leftHand, back)}
++    ${L(neck, rightElbow, front)}
++    ${L(rightElbow, rightHand, front)}
++    ${L(pelvis, leftKnee, back)}
++    ${L(leftKnee, leftFoot, back)}
++    ${L(pelvis, rightKnee, front)}
++    ${L(rightKnee, rightFoot, front)}
++  </svg>`;
++}
+diff --git a/frontend/poses.js b/frontend/poses.js
+new file mode 100644
+index 0000000..f2727ae
+--- /dev/null
++++ b/frontend/poses.js
+@@ -0,0 +1,618 @@
++/* =====================================================
++   YOGA TRACKER — База из 100 поз
++   figure: { base, torso?, la, ra, ll, rl, px?, py?, head? }
++   Углы: 0=вверх, 90=вправо, 180=вниз, 270=влево
++   Поза смотрит вправо. la/ra — левая/правая рука; ll/rl — ноги.
++   ===================================================== */
++
++const POSES = [
++  // ============= СТОЯЧИЕ (25) =============
++  { id:'tadasana', name_ru:'Тадасана', name_en:'Mountain Pose', category:'standing',
++    energy:1, difficulty:1, duration_hint:30, body:['posture','legs'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','relaxing','meditative'],
++    phase:['warmup'], breath:'Вдох — вырастай вверх, выдох — укореняйся',
++    figure:{ base:'stand', la:[180,180], ra:[180,180], ll:[180,180], rl:[180,180] } },
++
++  { id:'urdhva_hastasana', name_ru:'Урдхва Хастасана', name_en:'Upward Salute', category:'standing',
++    energy:2, difficulty:1, duration_hint:30, body:['shoulders','spine'],
++    time_of_day:['morning','day'], intensity:['intensive','relaxing'],
++    phase:['warmup'], breath:'Вдох — тянись пальцами к небу',
++    figure:{ base:'stand', la:[10,10], ra:[-10,-10], ll:[180,180], rl:[180,180] } },
++
++  { id:'uttanasana', name_ru:'Уттанасана', name_en:'Standing Forward Fold', category:'standing',
++    energy:1, difficulty:1, duration_hint:45, body:['hamstrings','back'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing','meditative'],
++    phase:['warmup','cooldown'], breath:'Выдох — стекай вниз, как водопад',
++    figure:{ base:'stand', py:55, torso:115, la:[150,170], ra:[150,170], ll:[180,180], rl:[180,180] } },
++
++  { id:'ardha_uttanasana', name_ru:'Ардха Уттанасана', name_en:'Half Forward Fold', category:'standing',
++    energy:2, difficulty:1, duration_hint:30, body:['back','hamstrings'],
++    time_of_day:['morning','day'], intensity:['intensive','relaxing'],
++    phase:['warmup'], breath:'Вдох — вытягивай позвоночник вперёд',
++    figure:{ base:'stand', py:55, torso:90, la:[110,110], ra:[110,110], ll:[180,180], rl:[180,180] } },
++
++  { id:'utkatasana', name_ru:'Уткатасана', name_en:'Chair Pose', category:'standing',
++    energy:3, difficulty:2, duration_hint:45, body:['quads','core','shoulders'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Вдох — растягивайся, выдох — садись глубже',
++    figure:{ base:'stand', py:55, torso:-15, la:[-15,-5], ra:[15,5], ll:[160,200], rl:[160,200] } },
++
++  { id:'warrior1', name_ru:'Воин I', name_en:'Warrior I', category:'standing',
++    energy:3, difficulty:2, duration_hint:60, body:['legs','hips','shoulders'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Вдох — тянись вверх, выдох — заземляйся',
++    figure:{ base:'stand', py:55, torso:-5, la:[-5,-5], ra:[5,5], ll:[210,210], rl:[145,180] } },
++
++  { id:'warrior2', name_ru:'Воин II', name_en:'Warrior II', category:'standing',
++    energy:3, difficulty:2, duration_hint:60, body:['legs','hips','shoulders'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Вдох — раскрывай грудь, выдох — углубляйся',
++    figure:{ base:'stand', py:55, la:[270,270], ra:[90,90], ll:[200,200], rl:[145,180] } },
++
++  { id:'warrior3', name_ru:'Воин III', name_en:'Warrior III', category:'standing',
++    energy:3, difficulty:3, duration_hint:45, body:['balance','core','legs'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Лети как стрела — параллельно земле',
++    figure:{ base:'stand', py:60, torso:90, la:[80,80], ra:[80,80], ll:[260,260], rl:[180,180] } },
++
++  { id:'trikonasana', name_ru:'Триконасана', name_en:'Triangle', category:'standing',
++    energy:2, difficulty:2, duration_hint:45, body:['hamstrings','sides','hips'],
++    time_of_day:['morning','day'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Вдох — длина, выдох — глубина',
++    figure:{ base:'stand', py:55, torso:75, la:[75,75], ra:[255,255], ll:[210,210], rl:[150,150] } },
++
++  { id:'parsvakonasana', name_ru:'Паршваконасана', name_en:'Extended Side Angle', category:'standing',
++    energy:3, difficulty:2, duration_hint:45, body:['legs','sides','hips'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Создавай линию от пятки до пальцев',
++    figure:{ base:'stand', py:55, torso:60, la:[60,60], ra:[240,240], ll:[215,215], rl:[140,190] } },
++
++  { id:'parsvottanasana', name_ru:'Паршвоттанасана', name_en:'Pyramid', category:'standing',
++    energy:2, difficulty:2, duration_hint:45, body:['hamstrings','hips'],
++    time_of_day:['morning','day'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Складывайся над передней ногой',
++    figure:{ base:'stand', py:55, torso:100, la:[100,100], ra:[100,100], ll:[200,200], rl:[160,160] } },
++
++  { id:'prasarita_padottanasana', name_ru:'Прасарита Падоттанасана', name_en:'Wide-Leg Forward Fold', category:'standing',
++    energy:1, difficulty:2, duration_hint:60, body:['hamstrings','back'],
++    time_of_day:['day','evening'], intensity:['relaxing'],
++    phase:['main','cooldown'], breath:'Голова мягко тяжелеет к полу',
++    figure:{ base:'stand', py:55, torso:115, la:[120,170], ra:[120,170], ll:[220,220], rl:[140,140] } },
++
++  { id:'ardha_chandrasana', name_ru:'Ардха Чандрасана', name_en:'Half Moon', category:'standing',
++    energy:3, difficulty:3, duration_hint:45, body:['balance','core','legs'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Цветёт от центра к концам',
++    figure:{ base:'stand', py:55, torso:80, la:[0,0], ra:[180,180], ll:[100,100], rl:[160,160] } },
++
++  { id:'vrksasana', name_ru:'Врикшасана', name_en:'Tree', category:'standing',
++    energy:2, difficulty:2, duration_hint:45, body:['balance','hips'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','relaxing','meditative'],
++    phase:['main'], breath:'Корни вниз, ветви вверх',
++    figure:{ base:'stand', py:55, la:[5,5], ra:[-5,-5], ll:[230,140], rl:[180,180] } },
++
++  { id:'garudasana', name_ru:'Гарудасана', name_en:'Eagle', category:'standing',
++    energy:2, difficulty:3, duration_hint:45, body:['balance','shoulders','hips'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Скручивайся в тугой узел',
++    figure:{ base:'stand', py:55, torso:-5, la:[100,40], ra:[80,40], ll:[170,210], rl:[160,200] } },
++
++  { id:'natarajasana', name_ru:'Натараджасана', name_en:'Dancer', category:'standing',
++    energy:3, difficulty:3, duration_hint:45, body:['balance','back','quads'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Лети, как танцор Шива',
++    figure:{ base:'stand', py:55, torso:80, la:[60,60], ra:[280,330], ll:[300,40], rl:[180,180] } },
++
++  { id:'utthita_hasta_padangusthasana', name_ru:'Уттхита Хаста Падангуштхасана', name_en:'Extended Hand-to-Big-Toe', category:'standing',
++    energy:2, difficulty:3, duration_hint:30, body:['balance','hamstrings'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Дыши в стабильность',
++    figure:{ base:'stand', py:55, la:[180,180], ra:[110,110], ll:[180,180], rl:[100,100] } },
++
++  { id:'anjaneyasana', name_ru:'Анджанейасана', name_en:'Low Lunge', category:'standing',
++    energy:2, difficulty:1, duration_hint:45, body:['hips','quads'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','relaxing'],
++    phase:['warmup','main'], breath:'Раскрывай переднюю поверхность бедра',
++    figure:{ base:'stand', py:60, torso:-10, la:[-10,-10], ra:[10,10], ll:[225,170], rl:[130,180] } },
++
++  { id:'high_lunge', name_ru:'Высокий выпад', name_en:'High Lunge', category:'standing',
++    energy:3, difficulty:2, duration_hint:45, body:['legs','hips'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Создавай силу через ноги',
++    figure:{ base:'stand', py:55, torso:-5, la:[-5,-5], ra:[5,5], ll:[210,210], rl:[135,180] } },
++
++  { id:'malasana', name_ru:'Маласана', name_en:'Garland / Squat', category:'standing',
++    energy:1, difficulty:2, duration_hint:60, body:['hips','ankles'],
++    time_of_day:['day','evening'], intensity:['relaxing','meditative'],
++    phase:['main'], breath:'Сядь в глубину, расширь таз',
++    figure:{ base:'stand', py:70, torso:15, la:[160,200], ra:[200,160], ll:[140,225], rl:[220,135] } },
++
++  { id:'padangusthasana', name_ru:'Падангуштхасана', name_en:'Big Toe Pose', category:'standing',
++    energy:1, difficulty:2, duration_hint:45, body:['hamstrings','back'],
++    time_of_day:['morning','day'], intensity:['relaxing'],
++    phase:['warmup'], breath:'Выдох — глубже в складку',
++    figure:{ base:'stand', py:55, torso:120, la:[140,140], ra:[140,140], ll:[180,180], rl:[180,180] } },
++
++  { id:'viparita_virabhadrasana', name_ru:'Випарита Вирабхадрасана', name_en:'Reverse Warrior', category:'standing',
++    energy:3, difficulty:2, duration_hint:45, body:['sides','legs'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Выгибайся, как лук',
++    figure:{ base:'stand', py:55, torso:-15, la:[200,160], ra:[-30,-30], ll:[200,200], rl:[145,180] } },
++
++  { id:'parighasana', name_ru:'Паригхасана', name_en:'Gate Pose', category:'standing',
++    energy:1, difficulty:2, duration_hint:45, body:['sides','hips'],
++    time_of_day:['day','evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Открой пространство между рёбрами',
++    figure:{ base:'kneel', py:70, torso:75, la:[75,75], ra:[255,255], ll:[180,180], rl:[120,120] } },
++
++  { id:'surya_namaskar', name_ru:'Сурья Намаскар', name_en:'Sun Salutation Pose', category:'standing',
++    energy:3, difficulty:1, duration_hint:60, body:['full body'],
++    time_of_day:['morning'], intensity:['intensive'],
++    phase:['warmup'], breath:'Дыхание ведёт движение',
++    figure:{ base:'stand', la:[0,0], ra:[0,0], ll:[180,180], rl:[180,180] } },
++
++  { id:'standing_side_bend', name_ru:'Боковой наклон стоя', name_en:'Standing Side Bend', category:'standing',
++    energy:1, difficulty:1, duration_hint:30, body:['sides'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing'],
++    phase:['warmup'], breath:'Дыши в сжатую сторону',
++    figure:{ base:'stand', torso:-25, la:[-20,-20], ra:[-25,-25], ll:[180,180], rl:[180,180] } },
++
++  // ============= СИДЯЧИЕ (20) =============
++  { id:'dandasana', name_ru:'Дандасана', name_en:'Staff Pose', category:'seated',
++    energy:1, difficulty:1, duration_hint:30, body:['posture','hamstrings'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing','meditative'],
++    phase:['warmup'], breath:'Длинный позвоночник, активные ноги',
++    figure:{ base:'sit', la:[170,170], ra:[170,170], ll:[90,90], rl:[90,90] } },
++
++  { id:'paschimottanasana', name_ru:'Пашчимоттанасана', name_en:'Seated Forward Fold', category:'seated',
++    energy:1, difficulty:2, duration_hint:60, body:['hamstrings','back'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['main','cooldown'], breath:'Выдох — складывайся ниже',
++    figure:{ base:'sit', torso:80, la:[80,80], ra:[80,80], ll:[90,90], rl:[90,90] } },
++
++  { id:'janu_sirsasana', name_ru:'Джану Сиршасана', name_en:'Head-to-Knee', category:'seated',
++    energy:1, difficulty:2, duration_hint:60, body:['hamstrings','hips'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Сложись над прямой ногой',
++    figure:{ base:'sit', torso:75, la:[75,75], ra:[75,75], ll:[55,150], rl:[90,90] } },
++
++  { id:'ardha_matsyendrasana', name_ru:'Ардха Матсьендрасана', name_en:'Seated Twist', category:'seated',
++    energy:2, difficulty:2, duration_hint:45, body:['spine','sides'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Вдох — длина, выдох — скрутка',
++    figure:{ base:'sit', torso:-10, la:[110,170], ra:[200,200], ll:[100,140], rl:[60,90] } },
++
++  { id:'baddha_konasana', name_ru:'Баддха Конасана', name_en:'Bound Angle / Butterfly', category:'seated',
++    energy:1, difficulty:1, duration_hint:60, body:['hips','groin'],
++    time_of_day:['day','evening'], intensity:['relaxing','meditative'],
++    phase:['main'], breath:'Колени мягкие, дыхание глубокое',
++    figure:{ base:'sit', la:[160,200], ra:[200,160], ll:[55,140], rl:[125,40] } },
++
++  { id:'upavista_konasana', name_ru:'Упавиштха Конасана', name_en:'Wide-Angle Seated', category:'seated',
++    energy:1, difficulty:2, duration_hint:60, body:['hamstrings','hips'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Раскрой ноги, как цветок',
++    figure:{ base:'sit', torso:75, la:[75,75], ra:[75,75], ll:[60,60], rl:[120,120] } },
++
++  { id:'gomukhasana', name_ru:'Гомукхасана', name_en:'Cow Face', category:'seated',
++    energy:1, difficulty:2, duration_hint:45, body:['shoulders','hips'],
++    time_of_day:['day','evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Растягивай между лопаток',
++    figure:{ base:'sit', la:[10,200], ra:[180,340], ll:[100,160], rl:[80,20] } },
++
++  { id:'virasana', name_ru:'Вирасана', name_en:'Hero Pose', category:'seated',
++    energy:1, difficulty:1, duration_hint:60, body:['quads','ankles'],
++    time_of_day:['morning','evening'], intensity:['relaxing','meditative'],
++    phase:['warmup','main'], breath:'Сядь, как герой, между пятками',
++    figure:{ base:'kneel', py:73, la:[180,180], ra:[180,180], ll:[200,5], rl:[160,355] } },
++
++  { id:'sukhasana', name_ru:'Сукхасана', name_en:'Easy Pose', category:'seated',
++    energy:1, difficulty:1, duration_hint:120, body:['hips','posture'],
++    time_of_day:['morning','day','evening'], intensity:['meditative'],
++    phase:['warmup','cooldown'], breath:'Дыши спокойно и ровно',
++    figure:{ base:'sit', py:80, la:[170,170], ra:[170,170], ll:[60,160], rl:[120,200] } },
++
++  { id:'padmasana', name_ru:'Падмасана', name_en:'Lotus', category:'seated',
++    energy:1, difficulty:3, duration_hint:120, body:['hips','knees'],
++    time_of_day:['morning','evening'], intensity:['meditative'],
++    phase:['main','cooldown'], breath:'Сядь, как лотос, в спокойствие',
++    figure:{ base:'sit', py:80, la:[170,170], ra:[170,170], ll:[50,170], rl:[130,190] } },
++
++  { id:'ardha_padmasana', name_ru:'Ардха Падмасана', name_en:'Half Lotus', category:'seated',
++    energy:1, difficulty:2, duration_hint:90, body:['hips'],
++    time_of_day:['morning','evening'], intensity:['meditative','relaxing'],
++    phase:['main'], breath:'Спокойствие половиной лотоса',
++    figure:{ base:'sit', py:80, la:[170,170], ra:[170,170], ll:[55,170], rl:[120,200] } },
++
++  { id:'navasana', name_ru:'Навасана', name_en:'Boat', category:'seated',
++    energy:3, difficulty:2, duration_hint:30, body:['core','hip flexors'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Дыши через огонь живота',
++    figure:{ base:'sit', py:75, torso:-30, la:[60,60], ra:[60,60], ll:[55,55], rl:[55,55] } },
++
++  { id:'ardha_navasana', name_ru:'Ардха Навасана', name_en:'Half Boat', category:'seated',
++    energy:2, difficulty:1, duration_hint:30, body:['core'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Дрожь — это рост',
++    figure:{ base:'sit', py:75, torso:-30, la:[60,60], ra:[60,60], ll:[75,75], rl:[75,75] } },
++
++  { id:'marichyasana3', name_ru:'Маричьясана III', name_en:'Marichi III', category:'seated',
++    energy:2, difficulty:2, duration_hint:45, body:['spine','core'],
++    time_of_day:['day','evening'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Скручивайся длинной спиной',
++    figure:{ base:'sit', torso:-15, la:[195,195], ra:[120,160], ll:[100,150], rl:[90,90] } },
++
++  { id:'parivrtta_janu_sirsasana', name_ru:'Паривритта Джану Сиршасана', name_en:'Revolved Head-to-Knee', category:'seated',
++    energy:2, difficulty:3, duration_hint:45, body:['sides','hamstrings'],
++    time_of_day:['day','evening'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Скручивайся, как лиана',
++    figure:{ base:'sit', torso:75, la:[60,60], ra:[260,260], ll:[55,140], rl:[120,120] } },
++
++  { id:'agnistambhasana', name_ru:'Агнистамбхасана', name_en:'Fire Log', category:'seated',
++    energy:1, difficulty:2, duration_hint:60, body:['hips'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Дыши в раскрытие таза',
++    figure:{ base:'sit', la:[170,170], ra:[170,170], ll:[60,140], rl:[120,40] } },
++
++  { id:'pigeon_seated', name_ru:'Голубь (сидя)', name_en:'Seated Pigeon', category:'seated',
++    energy:1, difficulty:2, duration_hint:60, body:['hips'],
++    time_of_day:['day','evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Раскрывай тазобедренный сустав',
++    figure:{ base:'sit', la:[180,180], ra:[180,180], ll:[60,150], rl:[100,50] } },
++
++  { id:'parsva_sukhasana', name_ru:'Паршва Сукхасана', name_en:'Side-Stretch Easy', category:'seated',
++    energy:1, difficulty:1, duration_hint:30, body:['sides'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing','meditative'],
++    phase:['warmup'], breath:'Дыхание раскрывает рёбра',
++    figure:{ base:'sit', torso:-30, la:[-25,-25], ra:[200,200], ll:[60,160], rl:[120,200] } },
++
++  { id:'vajrasana', name_ru:'Ваджрасана', name_en:'Thunderbolt', category:'seated',
++    energy:1, difficulty:1, duration_hint:60, body:['knees','digestion'],
++    time_of_day:['morning','evening'], intensity:['meditative','relaxing'],
++    phase:['warmup','cooldown'], breath:'Спокойствие на пятках',
++    figure:{ base:'kneel', py:75, la:[180,180], ra:[180,180], ll:[190,10], rl:[170,350] } },
++
++  { id:'kraunchasana', name_ru:'Краунчасана', name_en:'Heron Pose', category:'seated',
++    energy:2, difficulty:3, duration_hint:45, body:['hamstrings'],
++    time_of_day:['day'], intensity:['intensive'],
++    phase:['main'], breath:'Поднимай ногу к небу',
++    figure:{ base:'sit', la:[170,170], ra:[60,60], ll:[100,180], rl:[40,40] } },
++
++  // ============= ЛЁЖА НА ЖИВОТЕ / ЧЕТВЕРЕНЬКАХ (15) =============
++  { id:'balasana', name_ru:'Баласана', name_en:'Child Pose', category:'prone',
++    energy:1, difficulty:1, duration_hint:60, body:['back','rest'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing','meditative'],
++    phase:['warmup','cooldown'], breath:'Возвращайся к себе',
++    figure:{ base:'child', py:75, torso:120, la:[110,110], ra:[110,110], ll:[150,30], rl:[210,330] } },
++
++  { id:'wide_child', name_ru:'Широкая Баласана', name_en:'Wide-Knee Child', category:'prone',
++    energy:1, difficulty:1, duration_hint:90, body:['hips','back'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['cooldown'], breath:'Растекайся между коленями',
++    figure:{ base:'child', py:75, torso:130, la:[130,130], ra:[130,130], ll:[100,30], rl:[260,330] } },
++
++  { id:'adho_mukha_svanasana', name_ru:'Адхо Мукха Шванасана', name_en:'Downward Dog', category:'prone',
++    energy:2, difficulty:1, duration_hint:60, body:['shoulders','hamstrings','back'],
++    time_of_day:['morning','day'], intensity:['intensive','relaxing'],
++    phase:['warmup','main'], breath:'Создавай длинную диагональ',
++    figure:{ base:'invert', px:50, py:45, torso:135, la:[130,130], ra:[130,130], ll:[210,210], rl:[210,210] } },
++
++  { id:'urdhva_mukha_svanasana', name_ru:'Урдхва Мукха Шванасана', name_en:'Upward Dog', category:'prone',
++    energy:3, difficulty:2, duration_hint:30, body:['back','chest'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Открой сердце к солнцу',
++    figure:{ base:'prone', px:50, py:75, torso:-30, la:[180,180], ra:[180,180], ll:[85,85], rl:[85,85] } },
++
++  { id:'bhujangasana', name_ru:'Бхуджангасана', name_en:'Cobra', category:'prone',
++    energy:2, difficulty:1, duration_hint:30, body:['back','chest'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Поднимайся через грудь, не через руки',
++    figure:{ base:'prone', px:35, py:80, torso:50, la:[160,200], ra:[160,200], ll:[88,88], rl:[88,88] } },
++
++  { id:'sphinx', name_ru:'Сфинкс', name_en:'Sphinx', category:'prone',
++    energy:1, difficulty:1, duration_hint:60, body:['back','chest'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['main'], breath:'Лёгкое раскрытие груди',
++    figure:{ base:'prone', px:35, py:80, torso:60, la:[150,210], ra:[150,210], ll:[88,88], rl:[88,88] } },
++
++  { id:'salabhasana', name_ru:'Шалабхасана', name_en:'Locust', category:'prone',
++    energy:3, difficulty:2, duration_hint:30, body:['back'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Расти, как саранча, всем телом',
++    figure:{ base:'prone', px:35, py:78, torso:75, la:[80,80], ra:[80,80], ll:[100,100], rl:[100,100] } },
++
++  { id:'dhanurasana', name_ru:'Дханурасана', name_en:'Bow', category:'prone',
++    energy:3, difficulty:3, duration_hint:30, body:['back','chest','quads'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Стань луком, тетива — дыхание',
++    figure:{ base:'prone', px:40, py:78, torso:30, la:[120,90], ra:[120,90], ll:[110,30], rl:[110,30] } },
++
++  { id:'ustrasana', name_ru:'Устрасана', name_en:'Camel', category:'prone',
++    energy:3, difficulty:2, duration_hint:30, body:['back','chest','hip flexors'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Откройся миру через сердце',
++    figure:{ base:'kneel', py:70, torso:-40, la:[200,180], ra:[200,180], ll:[180,360], rl:[180,360] } },
++
++  { id:'anahatasana', name_ru:'Анахатасана', name_en:'Heart-Melting / Puppy', category:'prone',
++    energy:1, difficulty:1, duration_hint:60, body:['shoulders','back'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Сердце тает в пол',
++    figure:{ base:'kneel', py:75, torso:100, la:[100,100], ra:[100,100], ll:[180,360], rl:[180,360] } },
++
++  { id:'pigeon', name_ru:'Капотасана (Голубь)', name_en:'Pigeon', category:'prone',
++    energy:1, difficulty:2, duration_hint:90, body:['hips','back'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Дыши в самый плотный участок',
++    figure:{ base:'prone', px:40, py:75, torso:30, la:[170,170], ra:[170,170], ll:[100,200], rl:[230,200] } },
++
++  { id:'sleeping_pigeon', name_ru:'Спящий голубь', name_en:'Sleeping Pigeon', category:'prone',
++    energy:1, difficulty:2, duration_hint:120, body:['hips'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['cooldown'], breath:'Отдай вес земле',
++    figure:{ base:'prone', px:40, py:78, torso:120, la:[110,110], ra:[110,110], ll:[100,200], rl:[230,200] } },
++
++  { id:'marjaryasana', name_ru:'Марджарьясана', name_en:'Cat', category:'prone',
++    energy:1, difficulty:1, duration_hint:30, body:['spine','back'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing'],
++    phase:['warmup'], breath:'Выдох — округляй спину',
++    figure:{ base:'kneel', py:68, torso:85, la:[120,120], ra:[120,120], ll:[210,330], rl:[210,330] } },
++
++  { id:'bitilasana', name_ru:'Битиласана', name_en:'Cow', category:'prone',
++    energy:1, difficulty:1, duration_hint:30, body:['spine','back'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing'],
++    phase:['warmup'], breath:'Вдох — прогибайся, открой сердце',
++    figure:{ base:'kneel', py:70, torso:75, la:[130,130], ra:[130,130], ll:[210,330], rl:[210,330] } },
++
++  { id:'three_leg_dog', name_ru:'Собака с поднятой ногой', name_en:'Three-Legged Dog', category:'prone',
++    energy:3, difficulty:2, duration_hint:30, body:['shoulders','core','hips'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Тянись пяткой к небу',
++    figure:{ base:'invert', px:50, py:45, torso:135, la:[130,130], ra:[130,130], ll:[330,330], rl:[210,210] } },
++
++  // ============= ЛЁЖА НА СПИНЕ (15) =============
++  { id:'savasana', name_ru:'Шавасана', name_en:'Corpse Pose', category:'supine',
++    energy:1, difficulty:1, duration_hint:180, body:['rest'],
++    time_of_day:['morning','day','evening'], intensity:['relaxing','meditative'],
++    phase:['cooldown'], breath:'Отпусти всё. Просто будь.',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[80,80], ra:[80,80], ll:[100,100], rl:[100,100] } },
++
++  { id:'apanasana', name_ru:'Апанасана', name_en:'Knees-to-Chest', category:'supine',
++    energy:1, difficulty:1, duration_hint:45, body:['lower back'],
++    time_of_day:['morning','evening'], intensity:['relaxing'],
++    phase:['warmup','cooldown'], breath:'Обнимай колени и дыши',
++    figure:{ base:'supine', px:35, py:80, torso:90, la:[120,60], ra:[120,60], ll:[170,30], rl:[170,30] } },
++
++  { id:'supta_baddha_konasana', name_ru:'Супта Баддха Конасана', name_en:'Reclining Butterfly', category:'supine',
++    energy:1, difficulty:1, duration_hint:120, body:['hips','rest'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['cooldown'], breath:'Расширь грудь, мягкие бёдра',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[80,80], ra:[80,80], ll:[140,40], rl:[60,160] } },
++
++  { id:'supta_padangusthasana', name_ru:'Супта Падангуштхасана', name_en:'Reclining Hand-to-Big-Toe', category:'supine',
++    energy:1, difficulty:2, duration_hint:60, body:['hamstrings'],
++    time_of_day:['morning','evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Тянись через пятку к небу',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[80,80], ra:[10,10], ll:[100,100], rl:[20,20] } },
++
++  { id:'supta_matsyendrasana', name_ru:'Супта Матсьендрасана', name_en:'Supine Twist', category:'supine',
++    energy:1, difficulty:1, duration_hint:60, body:['spine','back'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['cooldown'], breath:'Выдох — длинная спираль',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[60,60], ra:[60,60], ll:[100,100], rl:[160,100] } },
++
++  { id:'ananda_balasana', name_ru:'Ананда Баласана', name_en:'Happy Baby', category:'supine',
++    energy:1, difficulty:1, duration_hint:45, body:['hips','lower back'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['cooldown'], breath:'Покачивайся, как малыш',
++    figure:{ base:'supine', px:30, py:82, torso:90, la:[20,20], ra:[20,20], ll:[10,160], rl:[10,160] } },
++
++  { id:'setu_bandha', name_ru:'Сету Бандха', name_en:'Bridge', category:'supine',
++    energy:2, difficulty:1, duration_hint:45, body:['back','glutes'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Поднимай бёдра, открой грудь',
++    figure:{ base:'supine', px:35, py:75, torso:75, la:[100,100], ra:[100,100], ll:[170,90], rl:[170,90] } },
++
++  { id:'urdhva_dhanurasana', name_ru:'Урдхва Дханурасана', name_en:'Wheel / Upward Bow', category:'supine',
++    energy:3, difficulty:3, duration_hint:30, body:['back','shoulders'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Раскройся колесом к небу',
++    figure:{ base:'invert', px:50, py:55, torso:180, la:[150,150], ra:[150,150], ll:[170,170], rl:[170,170] } },
++
++  { id:'matsyasana', name_ru:'Матсьясана', name_en:'Fish', category:'supine',
++    energy:2, difficulty:2, duration_hint:30, body:['throat','chest'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Открой горло и сердце',
++    figure:{ base:'supine', px:30, py:78, torso:75, la:[100,100], ra:[100,100], ll:[100,100], rl:[100,100] } },
++
++  { id:'halasana', name_ru:'Халасана', name_en:'Plow', category:'supine',
++    energy:2, difficulty:3, duration_hint:45, body:['back','shoulders'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Дыши через сжатие',
++    figure:{ base:'supine', px:35, py:80, torso:90, la:[80,80], ra:[80,80], ll:[60,250], rl:[60,250] } },
++
++  { id:'supta_virasana', name_ru:'Супта Вирасана', name_en:'Reclining Hero', category:'supine',
++    energy:1, difficulty:3, duration_hint:60, body:['quads','hip flexors'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Дыхание длиннее напряжения',
++    figure:{ base:'supine', px:35, py:80, torso:90, la:[80,80], ra:[80,80], ll:[150,355], rl:[210,5] } },
++
++  { id:'pavanamuktasana', name_ru:'Паванамуктасана', name_en:'Wind-Relieving', category:'supine',
++    energy:1, difficulty:1, duration_hint:45, body:['digestion','lower back'],
++    time_of_day:['morning','evening'], intensity:['relaxing'],
++    phase:['warmup','cooldown'], breath:'Освобождай через выдох',
++    figure:{ base:'supine', px:30, py:82, torso:90, la:[80,80], ra:[140,80], ll:[100,100], rl:[170,40] } },
++
++  { id:'supta_konasana', name_ru:'Супта Конасана', name_en:'Reclining Wide-Angle', category:'supine',
++    energy:1, difficulty:1, duration_hint:60, body:['inner thighs'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Дыши в свободу таза',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[80,80], ra:[80,80], ll:[70,70], rl:[130,130] } },
++
++  { id:'jathara_parivartanasana', name_ru:'Джатхара Паривартанасана', name_en:'Belly Twist', category:'supine',
++    energy:1, difficulty:1, duration_hint:60, body:['spine','abdomen'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['cooldown'], breath:'Скручивайся выдохом',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[60,60], ra:[60,60], ll:[150,250], rl:[150,250] } },
++
++  { id:'legs_up_wall', name_ru:'Ноги на стене', name_en:'Legs Up the Wall', category:'supine',
++    energy:1, difficulty:1, duration_hint:180, body:['rest','circulation'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['cooldown'], breath:'Полная сдача гравитации',
++    figure:{ base:'supine', px:35, py:82, torso:90, la:[80,80], ra:[80,80], ll:[0,0], rl:[0,0] } },
++
++  // ============= ПЕРЕВЁРНУТЫЕ (10) =============
++  { id:'viparita_karani', name_ru:'Випарита Карани', name_en:'Inverted Action', category:'inverted',
++    energy:1, difficulty:1, duration_hint:180, body:['circulation','rest'],
++    time_of_day:['evening'], intensity:['relaxing','meditative'],
++    phase:['cooldown'], breath:'Отдых при подъёме ног',
++    figure:{ base:'supine', px:30, py:80, torso:90, la:[80,80], ra:[80,80], ll:[10,10], rl:[10,10] } },
++
++  { id:'sarvangasana', name_ru:'Сарвангасана', name_en:'Shoulderstand', category:'inverted',
++    energy:2, difficulty:3, duration_hint:60, body:['shoulders','circulation'],
++    time_of_day:['evening'], intensity:['intensive','relaxing'],
++    phase:['main'], breath:'Тянись пальцами ног к небу',
++    figure:{ base:'invert', px:50, py:65, torso:180, la:[80,40], ra:[80,40], ll:[180,180], rl:[180,180] } },
++
++  { id:'sirsasana', name_ru:'Сиршасана', name_en:'Headstand', category:'inverted',
++    energy:3, difficulty:3, duration_hint:60, body:['shoulders','core'],
++    time_of_day:['morning'], intensity:['intensive'],
++    phase:['main'], breath:'Центральная ось — твой стержень',
++    figure:{ base:'invert', px:50, py:50, torso:180, la:[140,80], ra:[140,80], ll:[180,180], rl:[180,180] } },
++
++  { id:'handstand', name_ru:'Адхо Мукха Врикшасана', name_en:'Handstand', category:'inverted',
++    energy:3, difficulty:3, duration_hint:30, body:['shoulders','core'],
++    time_of_day:['morning'], intensity:['intensive'],
++    phase:['main'], breath:'Дыши через всю длину',
++    figure:{ base:'invert', px:50, py:55, torso:180, la:[180,180], ra:[180,180], ll:[180,180], rl:[180,180] } },
++
++  { id:'pincha_mayurasana', name_ru:'Пинча Маюрасана', name_en:'Forearm Stand', category:'inverted',
++    energy:3, difficulty:3, duration_hint:30, body:['shoulders'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Стабильность через плечи',
++    figure:{ base:'invert', px:50, py:55, torso:180, la:[160,210], ra:[160,210], ll:[180,180], rl:[180,180] } },
++
++  { id:'dolphin', name_ru:'Дельфин', name_en:'Dolphin', category:'inverted',
++    energy:2, difficulty:2, duration_hint:45, body:['shoulders','hamstrings'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['warmup','main'], breath:'Готовь плечи к перевёрнутым',
++    figure:{ base:'invert', px:50, py:48, torso:135, la:[125,170], ra:[125,170], ll:[210,210], rl:[210,210] } },
++
++  { id:'tripod_headstand', name_ru:'Тренога', name_en:'Tripod Headstand', category:'inverted',
++    energy:3, difficulty:3, duration_hint:30, body:['shoulders','core'],
++    time_of_day:['morning'], intensity:['intensive'],
++    phase:['main'], breath:'Три точки опоры — стабильность',
++    figure:{ base:'invert', px:50, py:55, torso:180, la:[150,120], ra:[150,120], ll:[180,180], rl:[180,180] } },
++
++  { id:'half_shoulderstand', name_ru:'Полусарвангасана', name_en:'Half Shoulderstand', category:'inverted',
++    energy:1, difficulty:2, duration_hint:60, body:['circulation'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['cooldown'], breath:'Лёгкое перевёрнутое восстановление',
++    figure:{ base:'supine', px:30, py:78, torso:75, la:[100,60], ra:[100,60], ll:[40,40], rl:[40,40] } },
++
++  { id:'plow_pose', name_ru:'Плуг', name_en:'Plow Pose', category:'inverted',
++    energy:1, difficulty:3, duration_hint:60, body:['back','shoulders'],
++    time_of_day:['evening'], intensity:['relaxing'],
++    phase:['main'], breath:'Терпеливо в сжатии',
++    figure:{ base:'supine', px:35, py:80, torso:90, la:[80,80], ra:[80,80], ll:[50,250], rl:[50,250] } },
++
++  { id:'eka_pada_sirsasana_inv', name_ru:'Сиршасана с одной ногой', name_en:'One-Leg Headstand', category:'inverted',
++    energy:3, difficulty:3, duration_hint:30, body:['core','balance'],
++    time_of_day:['morning'], intensity:['intensive'],
++    phase:['main'], breath:'Одна нога — два мира',
++    figure:{ base:'invert', px:50, py:50, torso:180, la:[140,80], ra:[140,80], ll:[180,180], rl:[120,120] } },
++
++  // ============= БАЛАНС / КОР (10) =============
++  { id:'plank', name_ru:'Планка', name_en:'Plank', category:'balance',
++    energy:3, difficulty:1, duration_hint:30, body:['core','arms'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Дыши через линию тела',
++    figure:{ base:'prone', px:35, py:65, torso:90, la:[180,180], ra:[180,180], ll:[90,90], rl:[90,90] } },
++
++  { id:'chaturanga', name_ru:'Чатуранга Дандасана', name_en:'Four-Limbed Staff', category:'balance',
++    energy:3, difficulty:3, duration_hint:15, body:['arms','core'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Сила — на выдохе',
++    figure:{ base:'prone', px:35, py:70, torso:90, la:[170,210], ra:[170,210], ll:[90,90], rl:[90,90] } },
++
++  { id:'vasisthasana', name_ru:'Васиштхасана', name_en:'Side Plank', category:'balance',
++    energy:3, difficulty:2, duration_hint:30, body:['core','arms'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Длина от пяток до макушки',
++    figure:{ base:'sideplank', px:30, py:75, torso:65, la:[155,155], ra:[0,0], ll:[65,65], rl:[65,65] } },
++
++  { id:'purvottanasana', name_ru:'Пурвоттанасана', name_en:'Upward Plank', category:'balance',
++    energy:3, difficulty:2, duration_hint:30, body:['back','shoulders'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Раскрой переднюю сторону',
++    figure:{ base:'supine', px:35, py:65, torso:90, la:[180,180], ra:[180,180], ll:[100,100], rl:[100,100] } },
++
++  { id:'bakasana', name_ru:'Бакасана', name_en:'Crow Pose', category:'balance',
++    energy:3, difficulty:3, duration_hint:30, body:['arms','core'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Дыши через концентрацию',
++    figure:{ base:'hands', px:50, py:75, torso:170, la:[180,180], ra:[180,180], ll:[40,140], rl:[40,140] } },
++
++  { id:'parsva_bakasana', name_ru:'Паршва Бакасана', name_en:'Side Crow', category:'balance',
++    energy:3, difficulty:3, duration_hint:20, body:['core','obliques'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Скрученная сила',
++    figure:{ base:'hands', px:50, py:75, torso:170, la:[180,180], ra:[180,180], ll:[80,110], rl:[80,110] } },
++
++  { id:'eka_pada_galavasana', name_ru:'Эка Пада Галавасана', name_en:'Flying Pigeon', category:'balance',
++    energy:3, difficulty:3, duration_hint:20, body:['hips','arms'],
++    time_of_day:['day'], intensity:['intensive'],
++    phase:['main'], breath:'Лети с фокусом',
++    figure:{ base:'hands', px:50, py:75, torso:170, la:[180,180], ra:[180,180], ll:[100,100], rl:[40,140] } },
++
++  { id:'tittibhasana', name_ru:'Титтхибхасана', name_en:'Firefly', category:'balance',
++    energy:3, difficulty:3, duration_hint:20, body:['core','hamstrings'],
++    time_of_day:['day'], intensity:['intensive'],
++    phase:['main'], breath:'Светись изнутри',
++    figure:{ base:'sit', py:70, torso:-15, la:[180,180], ra:[180,180], ll:[60,60], rl:[120,120] } },
++
++  { id:'astavakrasana', name_ru:'Аштавакрасана', name_en:'Eight-Angle', category:'balance',
++    energy:3, difficulty:3, duration_hint:20, body:['core','arms'],
++    time_of_day:['day'], intensity:['intensive'],
++    phase:['main'], breath:'Восемь углов в одной позе',
++    figure:{ base:'sideplank', py:75, torso:80, la:[170,170], ra:[20,20], ll:[80,80], rl:[80,80] } },
++
++  { id:'low_side_plank', name_ru:'Низкая боковая планка', name_en:'Forearm Side Plank', category:'balance',
++    energy:3, difficulty:2, duration_hint:30, body:['core','obliques'],
++    time_of_day:['morning','day'], intensity:['intensive'],
++    phase:['main'], breath:'Удержи диагональ',
++    figure:{ base:'sideplank', px:30, py:75, torso:70, la:[155,200], ra:[10,10], ll:[70,70], rl:[70,70] } },
++
++  // ============= ДЫХАТЕЛЬНЫЕ (5) =============
++  { id:'pranayama_seated', name_ru:'Пранаяма сидя', name_en:'Seated Pranayama', category:'breathing',
++    energy:1, difficulty:1, duration_hint:120, body:['breath'],
++    time_of_day:['morning','evening'], intensity:['meditative'],
++    phase:['warmup','cooldown'], breath:'Естественное, ровное дыхание',
++    figure:{ base:'sit', py:78, la:[160,160], ra:[160,160], ll:[60,160], rl:[120,200] } },
++
++  { id:'nadi_shodhana', name_ru:'Нади Шодхана', name_en:'Alternate Nostril Breath', category:'breathing',
++    energy:1, difficulty:1, duration_hint:180, body:['breath','focus'],
++    time_of_day:['morning','evening'], intensity:['meditative'],
++    phase:['warmup','cooldown'], breath:'Через одну ноздрю — другую',
++    figure:{ base:'sit', py:78, la:[170,170], ra:[50,20], ll:[60,160], rl:[120,200] } },
++
++  { id:'kapalabhati', name_ru:'Капалабхати', name_en:'Skull-Shining Breath', category:'breathing',
++    energy:3, difficulty:2, duration_hint:60, body:['breath','core'],
++    time_of_day:['morning'], intensity:['intensive'],
++    phase:['warmup'], breath:'Активные выдохи через нос',
++    figure:{ base:'sit', py:78, la:[170,170], ra:[170,170], ll:[60,160], rl:[120,200] } },
++
++  { id:'bhramari', name_ru:'Бхрамари', name_en:'Bee Breath', category:'breathing',
++    energy:1, difficulty:1, duration_hint:120, body:['breath','calm'],
++    time_of_day:['evening'], intensity:['meditative','relaxing'],
++    phase:['cooldown'], breath:'Гул успокаивает разум',
++    figure:{ base:'sit', py:78, la:[40,80], ra:[-40,-80], ll:[60,160], rl:[120,200] } },
++
++  { id:'ujjayi', name_ru:'Уджайи', name_en:'Ocean Breath', category:'breathing',
++    energy:2, difficulty:1, duration_hint:120, body:['breath'],
++    time_of_day:['morning','day','evening'], intensity:['intensive','meditative'],
++    phase:['warmup'], breath:'Шум океана в горле',
++    figure:{ base:'sit', py:78, la:[170,170], ra:[170,170], ll:[60,160], rl:[120,200] } },
++];
++
++// Удобные карты для поиска
++const POSES_BY_ID = Object.fromEntries(POSES.map(p => [p.id, p]));
+diff --git a/frontend/styles.css b/frontend/styles.css
+index 9011b5e..9f30cd4 100644
+--- a/frontend/styles.css
++++ b/frontend/styles.css
+@@ -1279,6 +1279,402 @@ button:active:not(:disabled) {
+ .ach-name  { font-size: 15px; font-weight: 800; color: var(--text); }
+ .ach-desc  { font-size: 12px; color: var(--text-secondary); }
+ 
++/* =====================================================
++   ГЕНЕРАТОР ПРОГРАММ
++   ===================================================== */
++
++/* ─── Карточка-вход на вкладке Практики ─── */
++.generator-entry-card {
++  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 70%, #7B1FA2 100%) !important;
++  color: white;
++  position: relative;
++  overflow: hidden;
++  box-shadow: 0 8px 32px var(--glow);
++}
++.generator-entry-card::before {
++  content: '';
++  position: absolute; inset: 0;
++  background: radial-gradient(circle at 90% 10%, rgba(255,255,255,0.18) 0%, transparent 60%);
++  pointer-events: none;
++}
++.generator-entry-top {
++  display: flex; align-items: center; justify-content: space-between;
++  gap: 12px; position: relative; z-index: 1;
++}
++.generator-entry-title {
++  font-size: 17px; font-weight: 800; color: white;
++}
++.generator-entry-desc {
++  font-size: 12px; color: rgba(255,255,255,0.85);
++  margin-top: 3px;
++}
++.generator-entry-card .btn-start-program {
++  background: rgba(255,255,255,0.96);
++  color: var(--primary-dark);
++  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
++}
++.recent-programs {
++  margin-top: 14px;
++  display: flex; flex-direction: column; gap: 8px;
++  position: relative; z-index: 1;
++}
++.recent-program-chip {
++  display: flex; align-items: center; gap: 10px;
++  background: rgba(255,255,255,0.18);
++  border: 1px solid rgba(255,255,255,0.3);
++  border-radius: 12px;
++  padding: 10px 12px;
++  font-size: 13px; color: white;
++  cursor: pointer; transition: all 0.2s;
++}
++.recent-program-chip:active { transform: scale(0.97); }
++.recent-program-chip-meta { flex: 1; opacity: 0.9; font-size: 12px; }
++
++/* =====================================================
++   ОВЕРЛЕЙ-ЭКРАНЫ
++   ===================================================== */
++.overlay-screen {
++  position: fixed; inset: 0; z-index: 300;
++  background: var(--bg);
++  display: flex; flex-direction: column;
++  animation: overlayIn 0.3s cubic-bezier(0.34,1.2,0.64,1);
++}
++@keyframes overlayIn {
++  from { opacity: 0; transform: translateY(20px); }
++  to   { opacity: 1; transform: translateY(0); }
++}
++.overlay-header {
++  display: flex; align-items: center; gap: 12px;
++  padding: 16px;
++  border-bottom: 1px solid var(--border-subtle);
++  background: var(--glass-bg);
++  backdrop-filter: var(--glass-blur);
++  z-index: 2;
++}
++.overlay-back, .overlay-action {
++  width: 36px; height: 36px;
++  background: var(--surface-2);
++  border: 1px solid var(--border-subtle);
++  border-radius: 10px;
++  font-size: 18px; color: var(--text);
++  cursor: pointer;
++  display: flex; align-items: center; justify-content: center;
++  transition: all 0.2s;
++}
++.overlay-back:active, .overlay-action:active { transform: scale(0.92); }
++.overlay-title {
++  flex: 1; font-size: 16px; font-weight: 700; color: var(--text);
++}
++.overlay-content {
++  flex: 1; overflow-y: auto;
++  padding: 16px;
++}
++
++/* =====================================================
++   БИЛДЕР ПРОГРАММЫ (3 ШАГА)
++   ===================================================== */
++.builder-content {
++  display: flex; flex-direction: column; gap: 22px;
++}
++.builder-step {
++  display: flex; flex-direction: column; gap: 10px;
++}
++.builder-step-label {
++  font-size: 11px; font-weight: 800;
++  color: var(--text-muted);
++  text-transform: uppercase; letter-spacing: 1.2px;
++}
++.builder-options { display: grid; gap: 8px; }
++.builder-options-3 { grid-template-columns: repeat(3, 1fr); }
++.builder-options-4 { grid-template-columns: repeat(4, 1fr); }
++.builder-option {
++  background: var(--surface);
++  backdrop-filter: var(--glass-blur);
++  border: 2px solid var(--border-subtle);
++  border-radius: 16px;
++  padding: 16px 10px;
++  display: flex; flex-direction: column;
++  align-items: center; gap: 4px;
++  cursor: pointer;
++  transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
++  color: var(--text);
++}
++.builder-option:active { transform: scale(0.94); }
++.builder-option.builder-selected {
++  border-color: var(--primary);
++  background: var(--primary-soft);
++  box-shadow: 0 6px 20px var(--glow);
++  transform: scale(1.04);
++}
++.builder-option.builder-selected .builder-name { color: var(--primary); }
++.builder-emoji { font-size: 28px; }
++.builder-name { font-size: 13px; font-weight: 800; }
++.builder-sub  { font-size: 10px; color: var(--text-muted); font-weight: 600; }
++.builder-option-small .builder-name { font-size: 22px; font-weight: 900; }
++.builder-option-small .builder-sub  { font-size: 11px; }
++
++#builder-generate {
++  margin-top: 8px;
++}
++#builder-generate:disabled {
++  opacity: 0.4; cursor: not-allowed;
++  box-shadow: none;
++}
++
++/* =====================================================
++   ВИД ПРОГРАММЫ — СПИСОК ПОЗ
++   ===================================================== */
++.program-meta {
++  font-size: 13px; color: var(--text-secondary);
++  margin-bottom: 14px;
++  display: flex; gap: 8px; flex-wrap: wrap;
++}
++.program-meta-chip {
++  background: var(--primary-soft);
++  color: var(--primary);
++  padding: 5px 10px; border-radius: 14px;
++  font-size: 12px; font-weight: 700;
++}
++.btn-start-guided { margin-bottom: 16px; }
++
++.program-poses-list {
++  display: flex; flex-direction: column; gap: 8px;
++}
++.program-pose-row {
++  display: flex; align-items: center; gap: 12px;
++  background: var(--surface);
++  border: 1px solid var(--border-subtle);
++  border-radius: 14px;
++  padding: 10px 12px;
++}
++.program-pose-num {
++  width: 24px; height: 24px;
++  background: var(--primary-soft);
++  color: var(--primary);
++  border-radius: 50%;
++  font-size: 11px; font-weight: 800;
++  display: flex; align-items: center; justify-content: center;
++  flex-shrink: 0;
++}
++.program-pose-svg {
++  width: 44px; height: 52px;
++  flex-shrink: 0;
++  color: var(--primary);
++}
++.program-pose-info {
++  flex: 1; min-width: 0;
++}
++.program-pose-name {
++  font-size: 13px; font-weight: 700; color: var(--text);
++  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
++}
++.program-pose-time {
++  font-size: 11px; color: var(--text-muted); font-weight: 600;
++}
++.program-pose-phase {
++  font-size: 9px; font-weight: 800;
++  padding: 3px 7px; border-radius: 8px;
++  text-transform: uppercase; letter-spacing: 0.5px;
++  flex-shrink: 0;
++}
++.phase-warmup   { background: rgba(108,184,178,0.18); color: #5cb8b2; }
++.phase-main     { background: rgba(240,144,64,0.18);  color: #f09040; }
++.phase-cooldown { background: rgba(192,132,252,0.18); color: var(--primary); }
++
++/* =====================================================
++   РЕЖИМ ГИДА
++   ===================================================== */
++.guided-screen {
++  background: linear-gradient(180deg, var(--bg) 0%, var(--primary-soft) 100%);
++}
++.guided-header {
++  display: flex; align-items: center; gap: 12px;
++  padding: 14px 16px;
++}
++.guided-close {
++  width: 36px; height: 36px;
++  background: var(--surface);
++  border: 1px solid var(--border-subtle);
++  border-radius: 50%; cursor: pointer;
++  font-size: 16px; color: var(--text);
++  display: flex; align-items: center; justify-content: center;
++}
++.guided-close:active { transform: scale(0.9); }
++.guided-progress { flex: 1; display: flex; flex-direction: column; gap: 5px; }
++#guided-position {
++  font-size: 11px; color: var(--text-muted); font-weight: 700;
++}
++.guided-progress-bar {
++  height: 6px; background: var(--surface-2); border-radius: 6px;
++  overflow: hidden;
++}
++.guided-progress-fill {
++  height: 100%;
++  background: linear-gradient(90deg, var(--primary), var(--primary-dark));
++  border-radius: 6px;
++  transition: width 0.4s cubic-bezier(0.34,1.2,0.64,1);
++  box-shadow: 0 0 8px var(--glow);
++}
++
++.guided-body {
++  flex: 1; overflow-y: auto;
++  display: flex; flex-direction: column;
++  align-items: center;
++  padding: 8px 16px 20px;
++  gap: 12px;
++}
++.guided-pose-svg {
++  width: 180px; height: 220px;
++  color: var(--primary);
++  display: flex; align-items: center; justify-content: center;
++  filter: drop-shadow(0 4px 20px var(--glow));
++  animation: poseIn 0.5s cubic-bezier(0.34,1.56,0.64,1);
++}
++@keyframes poseIn {
++  from { opacity: 0; transform: scale(0.85); }
++  to   { opacity: 1; transform: scale(1); }
++}
++.guided-pose-svg svg { width: 100%; height: 100%; }
++.guided-pose-name {
++  font-size: 22px; font-weight: 800; color: var(--text);
++  text-align: center;
++}
++.guided-pose-name-en {
++  font-size: 13px; color: var(--text-muted);
++  font-style: italic;
++}
++.guided-breath {
++  font-size: 14px; color: var(--primary);
++  font-weight: 600; text-align: center;
++  padding: 10px 16px;
++  background: var(--primary-soft);
++  border-radius: 14px;
++  max-width: 320px;
++}
++
++.guided-timer-ring {
++  position: relative;
++  width: 140px; height: 140px;
++  margin: 8px 0;
++}
++.guided-ring-svg {
++  width: 100%; height: 100%;
++  transform: rotate(-90deg);
++}
++.guided-ring-bg {
++  fill: none;
++  stroke: var(--surface-2);
++  stroke-width: 6;
++}
++.guided-ring-fg {
++  fill: none;
++  stroke: var(--primary);
++  stroke-width: 6;
++  stroke-linecap: round;
++  stroke-dasharray: 289;       /* 2 * π * 46 */
++  stroke-dashoffset: 0;
++  transition: stroke-dashoffset 1s linear;
++  filter: drop-shadow(0 0 6px var(--glow));
++}
++.guided-timer-text {
++  position: absolute; inset: 0;
++  display: flex; align-items: center; justify-content: center;
++  font-size: 30px; font-weight: 900;
++  color: var(--text);
++  font-variant-numeric: tabular-nums;
++}
++
++.guided-next {
++  margin-top: 4px;
++  display: flex; flex-direction: column; align-items: center; gap: 4px;
++}
++.guided-next-label {
++  font-size: 10px; font-weight: 700;
++  color: var(--text-muted);
++  text-transform: uppercase; letter-spacing: 1px;
++}
++.guided-next-inner {
++  display: flex; align-items: center; gap: 10px;
++  background: var(--surface);
++  border: 1px solid var(--border-subtle);
++  border-radius: 14px;
++  padding: 6px 14px 6px 6px;
++}
++.guided-next-svg {
++  width: 32px; height: 40px;
++  color: var(--text-muted);
++}
++.guided-next-name {
++  font-size: 12px; font-weight: 700; color: var(--text-secondary);
++}
++
++.guided-controls {
++  display: flex; gap: 16px;
++  justify-content: center;
++  padding: 12px 16px 24px;
++}
++.guided-btn {
++  width: 60px; height: 60px;
++  background: var(--glass-bg);
++  backdrop-filter: var(--glass-blur);
++  border: 1px solid var(--glass-border);
++  border-radius: 50%;
++  font-size: 22px; color: var(--text);
++  cursor: pointer;
++  box-shadow: var(--glass-shadow);
++  display: flex; align-items: center; justify-content: center;
++  transition: all 0.2s;
++}
++.guided-btn:active { transform: scale(0.9); }
++.guided-btn-skip { color: var(--primary); }
++
++/* =====================================================
++   ЭКРАН ЗАВЕРШЕНИЯ
++   ===================================================== */
++#program-finish {
++  align-items: center; justify-content: center;
++}
++.finish-content {
++  display: flex; flex-direction: column;
++  align-items: center; gap: 18px;
++  padding: 32px 24px;
++  text-align: center;
++  max-width: 360px;
++  margin: auto;
++}
++.finish-emoji {
++  font-size: 72px;
++  animation: finishBounce 0.8s cubic-bezier(0.34,1.56,0.64,1);
++}
++@keyframes finishBounce {
++  0%   { transform: scale(0) rotate(-30deg); opacity: 0; }
++  60%  { transform: scale(1.2) rotate(10deg); opacity: 1; }
++  100% { transform: scale(1) rotate(0); }
++}
++.finish-title {
++  font-size: 26px; font-weight: 800;
++  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
++  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
++  background-clip: text;
++}
++.finish-stats {
++  display: flex; gap: 18px;
++  font-size: 14px; color: var(--text-secondary);
++  font-weight: 600;
++}
++.finish-stat { display: flex; flex-direction: column; align-items: center; }
++.finish-stat-val {
++  font-size: 22px; font-weight: 900;
++  color: var(--primary);
++}
++.finish-actions {
++  display: flex; flex-direction: column; gap: 10px;
++  width: 100%; margin-top: 8px;
++}
++
++/* SVG позы в гиде */
++.pose-svg { display: block; }
++
+ /* =====================================================
+    ОФЛАЙН-БАННЕР
+    ===================================================== */
+diff --git a/frontend/sw.js b/frontend/sw.js
+index 5f0b9a7..d057ea8 100644
+--- a/frontend/sw.js
++++ b/frontend/sw.js
+@@ -6,8 +6,8 @@
+    - API mutations: Pass through (handled by offline queue in app.js)
+    ===================================================== */
+ 
+-const CACHE = 'yoga-v1';
+-const PRECACHE = ['/', '/app.js', '/styles.css', '/manifest.json', '/icon.svg'];
++const CACHE = 'yoga-v2';
++const PRECACHE = ['/', '/app.js', '/poses.js', '/pose-svg.js', '/styles.css', '/manifest.json', '/icon.svg'];
+ 
+ self.addEventListener('install', e => {
+   e.waitUntil(
+-- 
+2.43.0
+
