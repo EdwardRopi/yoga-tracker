@@ -1278,3 +1278,280 @@ button:active:not(:disabled) {
 .ach-label { font-size: 10px; color: var(--primary); font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
 .ach-name  { font-size: 15px; font-weight: 800; color: var(--text); }
 .ach-desc  { font-size: 12px; color: var(--text-secondary); }
+
+/* =====================================================
+   БИБЛИОТЕКА АСАН
+   ===================================================== */
+
+/* Поиск */
+.poses-search-wrap { margin-bottom: 10px; }
+.poses-search {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  font-size: 14px;
+  color: var(--text);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.poses-search::placeholder { color: var(--text-muted); }
+.poses-search:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+/* Чипы фильтров */
+.poses-filter-row {
+  display: flex; gap: 8px;
+  overflow-x: auto;
+  padding: 2px 2px 8px;
+  margin-bottom: 4px;
+  scrollbar-width: none;
+}
+.poses-filter-row::-webkit-scrollbar { display: none; }
+
+.filter-chip {
+  flex-shrink: 0;
+  padding: 7px 14px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  border-radius: 999px;
+  font-size: 12.5px; font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+}
+.filter-chip:active { transform: scale(0.94); }
+.filter-chip.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  border-color: transparent;
+  color: white;
+  box-shadow: 0 4px 12px var(--glow);
+}
+
+/* Счётчик */
+.poses-count {
+  font-size: 12px; color: var(--text-muted);
+  text-align: center; padding: 4px 0 10px;
+  font-weight: 600;
+}
+
+/* Сетка карточек */
+.poses-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-bottom: 20px;
+}
+
+/* Карточка позы */
+.pose-card {
+  position: relative;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 14px 10px 12px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+  cursor: pointer;
+  box-shadow: var(--glass-shadow);
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+  color: var(--text);
+  text-align: center;
+  overflow: hidden;
+}
+.pose-card:active { transform: scale(0.94); }
+.pose-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(circle at 50% 30%, var(--primary-soft) 0%, transparent 60%);
+  opacity: 0; transition: opacity 0.3s;
+  pointer-events: none;
+}
+.pose-card:hover::before { opacity: 1; }
+
+.pose-card-svg {
+  width: 72px; height: 72px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--primary);
+  filter: drop-shadow(0 2px 6px var(--primary-soft));
+  margin: 4px 0;
+}
+.pose-card-svg svg { width: 100%; height: 100%; }
+
+.pose-card-name {
+  font-size: 13px; font-weight: 800; color: var(--text);
+  line-height: 1.15;
+}
+.pose-card-sanskrit {
+  font-size: 10px; color: var(--text-muted);
+  font-style: italic; line-height: 1;
+}
+.pose-card-meta {
+  display: flex; align-items: center; gap: 5px;
+  margin-top: 2px;
+}
+.pose-meta-text {
+  font-size: 10px; color: var(--text-secondary); font-weight: 600;
+}
+
+/* Точка уровня */
+.pose-level-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  display: inline-block;
+}
+.pose-level-dot.level-1 { background: #6dbe6d; }
+.pose-level-dot.level-2 { background: #f0c040; }
+.pose-level-dot.level-3 { background: #e05050; }
+
+/* Иконка избранного на карточке */
+.pose-card-fav {
+  position: absolute; top: 8px; right: 8px;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1;
+  color: var(--primary);
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.pose-card-fav.is-fav {
+  opacity: 1;
+  filter: drop-shadow(0 0 6px var(--glow));
+}
+
+/* Состояния */
+.poses-loading,
+.poses-empty {
+  grid-column: 1 / -1;
+  padding: 30px 16px; text-align: center;
+  font-size: 13px; color: var(--text-muted);
+  line-height: 1.6;
+}
+.poses-empty small { font-size: 11px; opacity: 0.8; }
+
+/* =====================================================
+   МОДАЛКА ДЕТАЛЕЙ ПОЗЫ
+   ===================================================== */
+.pose-modal-box {
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 18px 18px 36px;
+  gap: 14px;
+}
+.pose-modal-box::-webkit-scrollbar { width: 0; }
+
+.pose-modal-close {
+  position: absolute; top: 12px; right: 14px;
+  width: 32px; height: 32px;
+  border: none; background: var(--surface-2);
+  border-radius: 50%;
+  font-size: 14px; color: var(--text-secondary);
+  cursor: pointer; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+}
+.pose-modal-close:active { transform: scale(0.9); }
+
+.pose-modal-svg {
+  width: 130px; height: 130px;
+  margin: 4px auto 0;
+  color: var(--primary);
+  filter: drop-shadow(0 4px 12px var(--primary-soft));
+}
+.pose-modal-svg svg { width: 100%; height: 100%; }
+
+.pose-modal-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 4px 0;
+}
+.pose-modal-name {
+  font-size: 22px; font-weight: 800;
+  background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.1;
+}
+.pose-modal-sanskrit {
+  font-size: 12px; color: var(--text-secondary);
+  font-style: italic; margin-top: 4px;
+}
+
+/* Кнопка избранного в модалке */
+.pose-fav-btn {
+  width: 38px; height: 38px;
+  border: 1.5px solid var(--glass-border);
+  background: var(--surface-2);
+  border-radius: 50%;
+  font-size: 18px; line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer; flex-shrink: 0;
+  transition: all 0.2s cubic-bezier(0.34,1.56,0.64,1);
+}
+.pose-fav-btn:active { transform: scale(0.85); }
+.pose-fav-btn.is-fav {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: 0 0 12px var(--glow);
+}
+
+/* Бейджи */
+.pose-modal-badges {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: 2px 0 6px;
+}
+.badge {
+  padding: 4px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.badge-level.level-1 { color: #5d9d5d; border-color: rgba(109,190,109,0.4); background: rgba(109,190,109,0.12); }
+.badge-level.level-2 { color: #c89000; border-color: rgba(240,192,64,0.4); background: rgba(240,192,64,0.12); }
+.badge-level.level-3 { color: #b03030; border-color: rgba(224,80,80,0.4); background: rgba(224,80,80,0.12); }
+
+/* Описание */
+.pose-modal-desc {
+  font-size: 14px; line-height: 1.55;
+  color: var(--text);
+  padding: 6px 2px;
+}
+
+/* Секции */
+.pose-modal-section { padding-top: 6px; }
+.pose-section-title {
+  font-size: 12px; font-weight: 800;
+  color: var(--primary);
+  text-transform: uppercase; letter-spacing: 0.8px;
+  margin-bottom: 8px;
+}
+.pose-section-warn { color: #d65a5a; }
+
+.pose-steps,
+.pose-benefits,
+.pose-contra {
+  padding-left: 22px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.pose-steps  li,
+.pose-benefits li,
+.pose-contra   li {
+  font-size: 13px; line-height: 1.5;
+  color: var(--text);
+}
+.pose-steps li::marker { color: var(--primary); font-weight: 700; }
+.pose-benefits li::marker { color: #6dbe6d; }
+.pose-contra   li::marker { color: #d65a5a; }
+.pose-contra   li { color: var(--text-secondary); }

@@ -1032,6 +1032,8 @@ let breathingState = {
 
 function loadPracticeTab() {
   loadPrograms();
+  loadPoses();
+  setupPosesSearch();
 }
 
 function startBreathing(key) {
@@ -1252,4 +1254,272 @@ function toast(message) {
   el.textContent = message;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 2200);
+}
+
+// =====================================================
+// БИБЛИОТЕКА АСАН
+// =====================================================
+const posesState = {
+  all:           [],
+  filter:        { level: '', effect: '', favorites: false },
+  searchQuery:   '',
+  currentPose:   null,
+  searchSetup:   false,
+};
+
+const LEVEL_LABELS = { 1: '🌱 Новичок', 2: '🌿 Средний', 3: '🌳 Продвинутый' };
+const EFFECT_LABELS = {
+  energy:      '⚡ Энергия',
+  relax:       '🌙 Расслабление',
+  sleep:       '💤 Сон',
+  strength:    '💪 Сила',
+  flexibility: '🦋 Гибкость',
+  grounding:   '🌍 Заземление',
+  focus:       '🎯 Фокус',
+};
+const CATEGORY_LABELS = {
+  standing:     'Стоя',
+  seated:       'Сидя',
+  prone:        'На животе',
+  supine:       'Лёжа на спине',
+  inverted:     'Перевёрнутые',
+  balance:      'Баланс',
+  restorative:  'Восстановит.',
+};
+const MUSCLE_LABELS = {
+  full_body:  'Всё тело',
+  back:       'Спина',
+  legs:       'Ноги',
+  arms:       'Руки',
+  core:       'Кор',
+  hips:       'Бёдра',
+  shoulders:  'Плечи',
+  balance:    'Баланс',
+};
+
+async function loadPoses() {
+  const grid    = document.getElementById('poses-grid');
+  const countEl = document.getElementById('poses-count');
+  if (!grid) return;
+
+  grid.innerHTML = '<div class="poses-loading">Загружаем библиотеку...</div>';
+
+  try {
+    const endpoint = posesState.filter.favorites
+      ? '/api/poses/favorites'
+      : buildPosesQuery();
+    const res  = await apiFetch(endpoint);
+    const data = await res.json();
+    posesState.all = data.poses || [];
+    renderPoses();
+  } catch (e) {
+    grid.innerHTML = '<div class="poses-loading">Ошибка загрузки</div>';
+    if (countEl) countEl.textContent = '';
+  }
+}
+
+function buildPosesQuery() {
+  const params = new URLSearchParams();
+  if (posesState.filter.level)  params.set('level',  posesState.filter.level);
+  if (posesState.filter.effect) params.set('effect', posesState.filter.effect);
+  if (posesState.searchQuery)   params.set('search', posesState.searchQuery);
+  const qs = params.toString();
+  return '/api/poses' + (qs ? '?' + qs : '');
+}
+
+function renderPoses() {
+  const grid    = document.getElementById('poses-grid');
+  const countEl = document.getElementById('poses-count');
+  if (!grid) return;
+
+  const list = posesState.all;
+  if (countEl) {
+    if (posesState.filter.favorites) {
+      countEl.textContent = list.length ? `⭐ Избранные: ${list.length}` : '⭐ Пусто — добавляй позы из карточек';
+    } else {
+      countEl.textContent = `Найдено: ${list.length}`;
+    }
+  }
+
+  if (!list.length) {
+    grid.innerHTML = '<div class="poses-empty">Ничего не найдено 🌸<br><small>Попробуй сбросить фильтры</small></div>';
+    return;
+  }
+
+  grid.innerHTML = list.map(p => `
+    <button class="pose-card" onclick="openPoseModal('${p.id}')">
+      <div class="pose-card-fav ${p.favorite ? 'is-fav' : ''}">${p.favorite ? '★' : ''}</div>
+      <div class="pose-card-svg">${getSilhouette(p.silhouette)}</div>
+      <div class="pose-card-name">${escapeHtml(p.name_ru)}</div>
+      <div class="pose-card-sanskrit">${escapeHtml(p.sanskrit)}</div>
+      <div class="pose-card-meta">
+        <span class="pose-level-dot level-${p.level}"></span>
+        <span class="pose-meta-text">${LEVEL_LABELS[p.level] || ''}</span>
+      </div>
+    </button>
+  `).join('');
+}
+
+function setupPosesSearch() {
+  if (posesState.searchSetup) return;
+  posesState.searchSetup = true;
+
+  // Поиск
+  const input = document.getElementById('poses-search');
+  if (input) {
+    let timer = null;
+    input.addEventListener('input', () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        posesState.searchQuery       = input.value.trim();
+        posesState.filter.favorites  = false;
+        syncFilterChips();
+        loadPoses();
+      }, 300);
+    });
+  }
+
+  // Чипы фильтров
+  document.querySelectorAll('.filter-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const filter = chip.dataset.filter;
+      const value  = chip.dataset.value;
+
+      if (filter === 'favorites') {
+        posesState.filter.favorites = !posesState.filter.favorites;
+        if (posesState.filter.favorites) {
+          posesState.filter.level  = '';
+          posesState.filter.effect = '';
+          posesState.searchQuery   = '';
+          const si = document.getElementById('poses-search');
+          if (si) si.value = '';
+        }
+      } else {
+        posesState.filter[filter]   = value;
+        posesState.filter.favorites = false;
+      }
+
+      syncFilterChips();
+      loadPoses();
+    });
+  });
+}
+
+function syncFilterChips() {
+  document.querySelectorAll('.filter-chip').forEach(chip => {
+    const filter = chip.dataset.filter;
+    const value  = chip.dataset.value;
+    let active = false;
+    if (filter === 'favorites') active = posesState.filter.favorites;
+    else                        active = posesState.filter[filter] === value;
+    chip.classList.toggle('active', active);
+  });
+}
+
+async function openPoseModal(poseId) {
+  try {
+    const res  = await apiFetch(`/api/poses/${poseId}`);
+    if (!res.ok) { toast('Не удалось загрузить позу'); return; }
+    const data = await res.json();
+    const pose = data.pose;
+    posesState.currentPose = pose;
+
+    // SVG
+    const svgEl = document.getElementById('pose-modal-svg');
+    if (svgEl) svgEl.innerHTML = getSilhouette(pose.silhouette);
+
+    // Заголовки
+    document.getElementById('pose-modal-name').textContent     = pose.name_ru;
+    document.getElementById('pose-modal-sanskrit').textContent =
+      pose.name_full ? `${pose.sanskrit} · ${pose.name_full}` : pose.sanskrit;
+
+    // Избранное
+    const favBtn = document.getElementById('pose-fav-btn');
+    favBtn.textContent = pose.favorite ? '★' : '☆';
+    favBtn.classList.toggle('is-fav', !!pose.favorite);
+
+    // Бейджи
+    document.getElementById('pose-modal-badges').innerHTML = `
+      <span class="badge badge-level level-${pose.level}">${LEVEL_LABELS[pose.level]}</span>
+      <span class="badge">${EFFECT_LABELS[pose.effect] || pose.effect}</span>
+      <span class="badge">${CATEGORY_LABELS[pose.category] || pose.category}</span>
+      <span class="badge">${MUSCLE_LABELS[pose.muscle_group] || pose.muscle_group}</span>
+      <span class="badge">⏱ ${formatDurationShort(pose.duration_sec)}</span>
+    `;
+
+    // Описание
+    document.getElementById('pose-modal-desc').textContent = pose.description || '';
+
+    // Шаги
+    const steps = pose.steps || [];
+    document.getElementById('pose-steps').innerHTML =
+      steps.map(s => `<li>${escapeHtml(s)}</li>`).join('');
+
+    // Польза
+    const benefits = pose.benefits || [];
+    document.getElementById('pose-benefits').innerHTML =
+      benefits.map(b => `<li>${escapeHtml(b)}</li>`).join('');
+
+    // Противопоказания
+    const contra = pose.contraindications || [];
+    document.getElementById('pose-contra').innerHTML =
+      contra.length
+        ? contra.map(c => `<li>${escapeHtml(c)}</li>`).join('')
+        : '<li>Нет существенных</li>';
+
+    // Сброс скролла модалки наверх
+    const box = document.querySelector('.pose-modal-box');
+    if (box) box.scrollTop = 0;
+
+    showElement('pose-modal');
+  } catch (e) {
+    toast('Ошибка загрузки позы');
+  }
+}
+
+function closePoseModal() {
+  hideElement('pose-modal');
+  posesState.currentPose = null;
+}
+
+async function togglePoseFav() {
+  const p = posesState.currentPose;
+  if (!p) return;
+
+  const willBeFav = !p.favorite;
+  const btn = document.getElementById('pose-fav-btn');
+  btn.textContent = willBeFav ? '★' : '☆';
+  btn.classList.toggle('is-fav', willBeFav);
+  p.favorite = willBeFav;
+
+  try {
+    const res = await apiFetch(`/api/poses/${p.id}/favorite`, {
+      method: willBeFav ? 'POST' : 'DELETE'
+    });
+    if (!res.ok) throw new Error('fail');
+
+    // Обновляем карточку в списке
+    const card = document.querySelector(`.pose-card[onclick*="${p.id}"] .pose-card-fav`);
+    if (card) {
+      card.classList.toggle('is-fav', willBeFav);
+      card.textContent = willBeFav ? '★' : '';
+    }
+    // Меняем флаг и в массиве
+    const item = posesState.all.find(x => x.id === p.id);
+    if (item) item.favorite = willBeFav;
+
+    toast(willBeFav ? 'В избранном ★' : 'Убрано из избранного');
+  } catch (e) {
+    // откат
+    btn.textContent = !willBeFav ? '★' : '☆';
+    btn.classList.toggle('is-fav', !willBeFav);
+    p.favorite = !willBeFav;
+    toast('Ошибка');
+  }
+}
+
+function formatDurationShort(sec) {
+  if (!sec) return '—';
+  if (sec >= 60) return `${Math.round(sec / 60)} мин`;
+  return `${sec} сек`;
 }

@@ -269,6 +269,73 @@
           </div>
         </div>
 
+        <!-- БИБЛИОТЕКА АСАН -->
+        <div id="poses-section">
+          <div class="section-label" style="margin-top:24px">📚 Библиотека асан</div>
+
+          <!-- Поиск -->
+          <div class="poses-search-wrap">
+            <input type="text" id="poses-search" class="poses-search" placeholder="🔍 Найти позу..." />
+          </div>
+
+          <!-- Чипы-фильтры по уровню -->
+          <div class="poses-filter-row" id="poses-level-filter">
+            <button class="filter-chip active" data-filter="level" data-value="">Все</button>
+            <button class="filter-chip" data-filter="level" data-value="1">🌱 Новичок</button>
+            <button class="filter-chip" data-filter="level" data-value="2">🌿 Средний</button>
+            <button class="filter-chip" data-filter="level" data-value="3">🌳 Продвинутый</button>
+            <button class="filter-chip" data-filter="favorites" data-value="1">⭐ Избранное</button>
+          </div>
+
+          <!-- Чипы-фильтры по эффекту -->
+          <div class="poses-filter-row" id="poses-effect-filter">
+            <button class="filter-chip active" data-filter="effect" data-value="">Все эффекты</button>
+            <button class="filter-chip" data-filter="effect" data-value="energy">⚡ Энергия</button>
+            <button class="filter-chip" data-filter="effect" data-value="relax">🌙 Расслабление</button>
+            <button class="filter-chip" data-filter="effect" data-value="strength">💪 Сила</button>
+            <button class="filter-chip" data-filter="effect" data-value="flexibility">🦋 Гибкость</button>
+            <button class="filter-chip" data-filter="effect" data-value="focus">🎯 Фокус</button>
+            <button class="filter-chip" data-filter="effect" data-value="grounding">🌍 Заземление</button>
+            <button class="filter-chip" data-filter="effect" data-value="sleep">💤 Сон</button>
+          </div>
+
+          <!-- Счётчик результатов -->
+          <div class="poses-count" id="poses-count">Загрузка...</div>
+
+          <!-- Сетка карточек -->
+          <div class="poses-grid" id="poses-grid"></div>
+        </div>
+
+        <!-- МОДАЛКА ДЕТАЛЕЙ ПОЗЫ -->
+        <div id="pose-modal" class="modal hidden">
+          <div class="modal-overlay" onclick="closePoseModal()"></div>
+          <div class="modal-box pose-modal-box">
+            <button class="pose-modal-close" onclick="closePoseModal()">✕</button>
+            <div class="pose-modal-svg" id="pose-modal-svg"></div>
+            <div class="pose-modal-header">
+              <div>
+                <div class="pose-modal-name" id="pose-modal-name"></div>
+                <div class="pose-modal-sanskrit" id="pose-modal-sanskrit"></div>
+              </div>
+              <button class="pose-fav-btn" id="pose-fav-btn" onclick="togglePoseFav()">☆</button>
+            </div>
+            <div class="pose-modal-badges" id="pose-modal-badges"></div>
+            <div class="pose-modal-desc" id="pose-modal-desc"></div>
+            <div class="pose-modal-section">
+              <div class="pose-section-title">Шаги выполнения</div>
+              <ol class="pose-steps" id="pose-steps"></ol>
+            </div>
+            <div class="pose-modal-section">
+              <div class="pose-section-title">Польза</div>
+              <ul class="pose-benefits" id="pose-benefits"></ul>
+            </div>
+            <div class="pose-modal-section">
+              <div class="pose-section-title pose-section-warn">Противопоказания</div>
+              <ul class="pose-contra" id="pose-contra"></ul>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- ВКЛАДКА 4: ПРОФИЛЬ -->
@@ -373,6 +440,7 @@
 
   </div><!-- end app -->
 
+  <script src="svg-poses.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
