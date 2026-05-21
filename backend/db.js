@@ -99,6 +99,19 @@ async function initDB() {
 
       CREATE INDEX IF NOT EXISTS idx_user_favorite_poses_user
         ON user_favorite_poses(user_id);
+
+      CREATE TABLE IF NOT EXISTS user_program_days (
+        id           SERIAL PRIMARY KEY,
+        user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        program_id   TEXT    NOT NULL,
+        day_num      INTEGER NOT NULL,
+        completed_at TIMESTAMPTZ DEFAULT NOW(),
+        duration_sec INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (user_id, program_id, day_num)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_program_days_user_program
+        ON user_program_days(user_id, program_id);
     `);
     console.log('PostgreSQL tables ready');
   } finally {

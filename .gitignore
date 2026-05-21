@@ -1,4 +1,10 @@
 node_modules/
 backend/.env
-backend/data/
+
+# старые sqlite-файлы (legacy), но не js-данные в backend/data/
+backend/data/*.db
 *.db
+
+# временные/мусорные файлы git и патчи
+FETCH_HEAD
+*.patch

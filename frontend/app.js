@@ -1142,21 +1142,21 @@ function renderPrograms(programs) {
   if (!list) return;
 
   list.innerHTML = programs.map(p => {
-    const pct      = p.active ? Math.round((p.daysDone / p.totalDays) * 100) : 0;
-    const btnLabel = p.completed ? '✅ Завершено' : p.active ? 'Продолжить' : 'Начать';
-    const btnClass = p.completed ? 'btn-done' : 'btn-start-program';
+    const pct = p.totalDays > 0 ? Math.round((p.daysDone / p.totalDays) * 100) : 0;
 
     return `
-      <div class="program-card card">
+      <div class="program-card card" onclick="openProgramDetail('${p.id}')">
         <div class="program-top">
           <span class="program-icon">${p.icon}</span>
           <div class="program-info">
             <div class="program-name">${p.name}</div>
-            <div class="program-days">${p.totalDays} дней</div>
+            <div class="program-days">${p.totalDays} дней · ${p.daysDone} пройдено</div>
           </div>
-          ${!p.completed ? `<button class="${btnClass}" onclick="handleProgram('${p.id}', ${p.active})">${btnLabel}</button>` : '<span class="program-done-badge">✅</span>'}
+          ${p.completed
+            ? '<span class="program-done-badge">✅</span>'
+            : '<span class="program-arrow">›</span>'}
         </div>
-        ${p.active ? `
+        ${p.active || p.daysDone > 0 ? `
           <div class="program-progress-wrap">
             <div class="program-progress-fill" style="width:${pct}%"></div>
           </div>
@@ -1165,20 +1165,6 @@ function renderPrograms(programs) {
       </div>
     `;
   }).join('');
-}
-
-async function handleProgram(programId, isActive) {
-  if (isActive) { toast('Продолжай практиковать! 💪'); return; }
-  try {
-    const res = await apiFetch('/api/programs/start', {
-      method: 'POST',
-      body: JSON.stringify({ programId })
-    });
-    if (res.ok) {
-      toast('Программа начата! 🎯');
-      loadPrograms();
-    }
-  } catch (e) { toast('Ошибка'); }
 }
 
 // =====================================================
@@ -1522,4 +1508,410 @@ function formatDurationShort(sec) {
   if (!sec) return '—';
   if (sec >= 60) return `${Math.round(sec / 60)} мин`;
   return `${sec} сек`;
+}
+
+// =====================================================
+// ЭКРАН ПРОГРАММЫ
+// =====================================================
+const programState = {
+  currentProgram: null,
+  currentDayData: null,
+};
+
+async function openProgramDetail(programId) {
+  try {
+    // На случай если программа ещё не начата — стартуем её (best effort)
+    try {
+      await apiFetch('/api/programs/start', {
+        method: 'POST',
+        body: JSON.stringify({ programId })
+      });
+    } catch (e) { /* не критично */ }
+
+    const res  = await apiFetch(`/api/programs/${programId}`);
+    if (!res.ok) { toast('Не удалось открыть программу'); return; }
+    const data = await res.json();
+    const p    = data.program;
+    programState.currentProgram = p;
+
+    document.getElementById('program-detail-title').textContent = p.name;
+    document.getElementById('program-hero-icon').textContent    = p.icon || '🗓';
+    document.getElementById('program-hero-name').textContent    = p.name;
+    document.getElementById('program-hero-desc').textContent    = p.description || '';
+
+    const pct = p.totalDays ? Math.round((p.daysDone / p.totalDays) * 100) : 0;
+    document.getElementById('program-hero-bar-fill').style.width = pct + '%';
+    document.getElementById('program-hero-progress-label').textContent =
+      `${p.daysDone} из ${p.totalDays} дней · ${pct}%`;
+
+    const list = document.getElementById('program-days-list');
+    list.innerHTML = p.days.map(d => {
+      const status = d.completed ? 'done' : (d.current ? 'current' : 'locked');
+      const ico    = d.completed ? '✓' : (d.current ? '▶' : d.day);
+      const dur    = d.duration_min ? `~ ${d.duration_min} мин` : '';
+      const cls    = `program-day program-day-${status}`;
+      const clickable = !d.completed || d.current;
+      const click  = `onclick="openDayPreview('${p.id}', ${d.day})"`;
+      return `
+        <button class="${cls}" ${click}>
+          <div class="program-day-num">
+            <span class="program-day-num-circle">${ico}</span>
+            <span class="program-day-label">День ${d.day}</span>
+          </div>
+          <div class="program-day-info">
+            <div class="program-day-title">${escapeHtml(d.title)}</div>
+            <div class="program-day-meta">${escapeHtml(d.sequenceName)} · ${dur} · ${d.posesCount} поз</div>
+          </div>
+          <div class="program-day-arrow">${d.completed ? '' : '›'}</div>
+        </button>
+      `;
+    }).join('');
+
+    showElement('program-detail-screen');
+    document.body.classList.add('no-scroll');
+  } catch (e) {
+    toast('Ошибка');
+  }
+}
+
+function closeProgramDetail() {
+  hideElement('program-detail-screen');
+  document.body.classList.remove('no-scroll');
+  programState.currentProgram = null;
+  loadPrograms();
+}
+
+// =====================================================
+// ПРЕВЬЮ ДНЯ
+// =====================================================
+async function openDayPreview(programId, dayNum) {
+  try {
+    const res = await apiFetch(`/api/programs/${programId}/day/${dayNum}`);
+    if (!res.ok) { toast('Не удалось открыть день'); return; }
+    const data = await res.json();
+    programState.currentDayData = data;
+
+    document.getElementById('day-preview-header').textContent = `${data.programName}`;
+    document.getElementById('day-preview-day-num').textContent = `День ${data.day}`;
+    document.getElementById('day-preview-title').textContent   = data.title;
+    document.getElementById('day-preview-duration').textContent =
+      `~ ${data.sequence.duration_min} мин`;
+    document.getElementById('day-preview-count').textContent =
+      `${data.sequence.posesCount} поз`;
+    document.getElementById('day-preview-desc').textContent = data.sequence.description || '';
+
+    // Кнопка
+    const btn = document.getElementById('btn-start-day');
+    btn.textContent = data.completed ? '🔁 Пройти снова' : '▶ Начать практику';
+
+    // Список поз
+    const list = document.getElementById('day-preview-poses');
+    list.innerHTML = data.poses.map((p, i) => `
+      <div class="day-pose-row">
+        <div class="day-pose-num">${i + 1}</div>
+        <div class="day-pose-svg">${getSilhouette(p.silhouette)}</div>
+        <div class="day-pose-info">
+          <div class="day-pose-name">${escapeHtml(p.name_ru)}${p.side ? `<span class="day-pose-side"> · ${p.side === 'right' ? 'право' : 'лево'}</span>` : ''}</div>
+          <div class="day-pose-sanskrit">${escapeHtml(p.sanskrit)}</div>
+        </div>
+        <div class="day-pose-time">${formatTime(p.duration_sec)}</div>
+      </div>
+    `).join('');
+
+    showElement('day-preview-screen');
+  } catch (e) {
+    toast('Ошибка');
+  }
+}
+
+function closeDayPreview() {
+  hideElement('day-preview-screen');
+  programState.currentDayData = null;
+}
+
+function formatTime(sec) {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m === 0) return `${s}с`;
+  if (s === 0) return `${m}м`;
+  return `${m}м ${s}с`;
+}
+
+// =====================================================
+// ПЛЕЕР ПОСЛЕДОВАТЕЛЬНОСТИ
+// =====================================================
+const playerState = {
+  active:        false,
+  programId:     null,
+  dayNum:        null,
+  programName:   '',
+  dayTitle:      '',
+  sequenceData:  null,
+  poses:         [],
+  currentIdx:    0,
+  remainingSec:  0,
+  paused:        false,
+  intervalId:    null,
+  betweenTimer:  null,
+  countdownTimer: null,
+  startedAt:     null,
+  totalElapsed:  0,
+};
+
+function startSequencePlayer() {
+  const data = programState.currentDayData;
+  if (!data || !data.poses?.length) { toast('Нет данных дня'); return; }
+
+  playerState.active        = true;
+  playerState.programId     = programState.currentProgram?.id;
+  playerState.dayNum        = data.day;
+  playerState.programName   = data.programName;
+  playerState.dayTitle      = data.title;
+  playerState.sequenceData  = data.sequence;
+  playerState.poses         = data.poses;
+  playerState.currentIdx    = 0;
+  playerState.paused        = false;
+  playerState.startedAt     = Date.now();
+  playerState.totalElapsed  = 0;
+
+  hideElement('day-preview-screen');
+  hideElement('program-detail-screen');
+  hideElement('player-complete');
+  hideElement('player-quit-confirm');
+  showElement('sequence-player');
+  document.body.classList.add('no-scroll');
+
+  // Telegram WebApp: расширить и закрыть подтверждение
+  if (window.Telegram?.WebApp) {
+    window.Telegram.WebApp.expand();
+    window.Telegram.WebApp.enableClosingConfirmation?.();
+  }
+
+  // Отсчёт 3-2-1
+  runCountdown(3);
+}
+
+function runCountdown(from) {
+  const elem = document.getElementById('player-countdown');
+  const numEl = document.getElementById('player-countdown-num');
+  showElement('player-countdown');
+
+  let n = from;
+  numEl.textContent = n;
+
+  playerState.countdownTimer = setInterval(() => {
+    n--;
+    if (n > 0) {
+      numEl.textContent = n;
+      hapticTick();
+    } else {
+      clearInterval(playerState.countdownTimer);
+      playerState.countdownTimer = null;
+      hideElement('player-countdown');
+      runPose(0);
+    }
+  }, 1000);
+}
+
+function runPose(idx) {
+  if (!playerState.active) return;
+  if (idx >= playerState.poses.length) { showCompleteScreen(); return; }
+
+  playerState.currentIdx = idx;
+  const pose = playerState.poses[idx];
+
+  // SVG
+  document.getElementById('player-pose-svg').innerHTML = getSilhouette(pose.silhouette);
+
+  // Названия
+  document.getElementById('player-pose-name').textContent = pose.name_ru;
+  document.getElementById('player-pose-sanskrit').textContent = pose.sanskrit || '';
+
+  // Сторона (если есть)
+  const sideEl = document.getElementById('player-pose-side');
+  if (pose.side) {
+    sideEl.textContent = pose.side === 'right' ? '› Правая сторона' : '‹ Левая сторона';
+    sideEl.classList.remove('hidden');
+  } else {
+    sideEl.classList.add('hidden');
+  }
+
+  // Подсказка о следующей позе
+  const next = playerState.poses[idx + 1];
+  const nextHint = document.getElementById('player-next-hint');
+  if (next) {
+    nextHint.textContent = `Далее: ${next.name_ru}${next.side ? ' (' + (next.side === 'right' ? 'право' : 'лево') + ')' : ''}`;
+  } else {
+    nextHint.textContent = 'Последняя поза';
+  }
+
+  // Прогресс
+  updatePlayerProgress();
+
+  // Таймер
+  playerState.remainingSec = pose.duration_sec;
+  updateTimerDisplay();
+  hapticTick();
+
+  // Запускаем интервал
+  if (playerState.intervalId) clearInterval(playerState.intervalId);
+  playerState.intervalId = setInterval(() => {
+    if (playerState.paused) return;
+    playerState.remainingSec--;
+    playerState.totalElapsed++;
+    updateTimerDisplay();
+    if (playerState.remainingSec <= 0) {
+      clearInterval(playerState.intervalId);
+      playerState.intervalId = null;
+      hapticTick();
+      goToNextPose();
+    }
+  }, 1000);
+}
+
+function goToNextPose() {
+  // Короткая пауза между позами
+  if (playerState.currentIdx + 1 >= playerState.poses.length) {
+    showCompleteScreen();
+    return;
+  }
+  // Можно сделать короткий "переход", но пока сразу к следующей
+  runPose(playerState.currentIdx + 1);
+}
+
+function updateTimerDisplay() {
+  const m = Math.floor(playerState.remainingSec / 60);
+  const s = playerState.remainingSec % 60;
+  document.getElementById('player-timer').textContent =
+    `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function updatePlayerProgress() {
+  const total = playerState.poses.length;
+  const cur   = playerState.currentIdx + 1;
+  const pct   = (cur / total) * 100;
+  document.getElementById('player-progress').style.width = pct + '%';
+  document.getElementById('player-counter').textContent = `${cur} / ${total}`;
+}
+
+function togglePause() {
+  playerState.paused = !playerState.paused;
+  const btn = document.getElementById('player-btn-pause');
+  btn.textContent = playerState.paused ? '▶' : '⏸';
+  hapticTick();
+}
+
+function prevPose() {
+  if (playerState.currentIdx > 0) {
+    if (playerState.intervalId) clearInterval(playerState.intervalId);
+    runPose(playerState.currentIdx - 1);
+  }
+}
+
+function nextPose() {
+  if (playerState.intervalId) clearInterval(playerState.intervalId);
+  if (playerState.currentIdx + 1 >= playerState.poses.length) {
+    showCompleteScreen();
+  } else {
+    runPose(playerState.currentIdx + 1);
+  }
+}
+
+function showCompleteScreen() {
+  // Останавливаем таймеры
+  if (playerState.intervalId) { clearInterval(playerState.intervalId); playerState.intervalId = null; }
+
+  const duration = playerState.totalElapsed;
+  const mins     = Math.max(1, Math.round(duration / 60));
+
+  document.getElementById('complete-duration').textContent = `${mins} мин`;
+  document.getElementById('complete-poses-count').textContent = playerState.poses.length;
+  document.getElementById('complete-sub').textContent =
+    `${playerState.programName} · ${playerState.dayTitle}`;
+
+  showElement('player-complete');
+  hapticTick();
+  hapticTick();
+}
+
+async function finishSequence(difficulty) {
+  if (!playerState.active) return;
+  const duration = Math.max(playerState.totalElapsed, 30); // минимум 30 сек
+
+  try {
+    const res = await apiFetch(
+      `/api/programs/${playerState.programId}/day/${playerState.dayNum}/complete`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ duration_sec: duration, difficulty })
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      toast(`День ${playerState.dayNum} засчитан 🎉`);
+
+      // Начисляем XP и обновляем данные
+      try { await awardXP(difficulty, duration); } catch (e) {}
+
+      // Закрываем плеер
+      cleanupPlayer();
+
+      // Обновляем данные
+      await loadStreak();
+      await loadTodayStatus();
+      loadWeekStats();
+
+      // Если программа полностью пройдена — поздравляем
+      if (data.completed) {
+        toast(`Программа "${playerState.programName}" завершена! 🏆`);
+      }
+
+      // Возвращаемся к экрану программы (обновим его)
+      if (playerState.programId) {
+        setTimeout(() => openProgramDetail(playerState.programId), 300);
+      }
+    } else {
+      toast('Ошибка сохранения');
+    }
+  } catch (e) {
+    toast('Ошибка соединения');
+  }
+}
+
+function askQuitPlayer() {
+  playerState.paused = true;
+  showElement('player-quit-confirm');
+}
+
+function cancelQuit() {
+  hideElement('player-quit-confirm');
+  playerState.paused = false;
+}
+
+function confirmQuit() {
+  cleanupPlayer();
+}
+
+function cleanupPlayer() {
+  if (playerState.intervalId) clearInterval(playerState.intervalId);
+  if (playerState.betweenTimer) clearTimeout(playerState.betweenTimer);
+  if (playerState.countdownTimer) clearInterval(playerState.countdownTimer);
+  playerState.intervalId = null;
+  playerState.betweenTimer = null;
+  playerState.countdownTimer = null;
+  playerState.active = false;
+
+  hideElement('sequence-player');
+  hideElement('player-countdown');
+  hideElement('player-complete');
+  hideElement('player-quit-confirm');
+  document.body.classList.remove('no-scroll');
+
+  if (window.Telegram?.WebApp?.disableClosingConfirmation) {
+    window.Telegram.WebApp.disableClosingConfirmation();
+  }
+}
+
+function hapticTick() {
+  try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred?.('light'); } catch (e) {}
 }

@@ -440,6 +440,126 @@
 
   </div><!-- end app -->
 
+  <!-- ===== ЭКРАН ДЕТАЛЕЙ ПРОГРАММЫ ===== -->
+  <div id="program-detail-screen" class="overlay-screen hidden">
+    <div class="overlay-header">
+      <button class="overlay-back" onclick="closeProgramDetail()">←</button>
+      <div class="overlay-header-title" id="program-detail-title">Программа</div>
+      <div class="overlay-spacer"></div>
+    </div>
+    <div class="overlay-body" id="program-detail-body">
+      <div class="program-hero">
+        <div class="program-hero-icon" id="program-hero-icon">🗓</div>
+        <div class="program-hero-name" id="program-hero-name"></div>
+        <div class="program-hero-desc" id="program-hero-desc"></div>
+        <div class="program-hero-progress">
+          <div class="program-hero-bar"><div class="program-hero-bar-fill" id="program-hero-bar-fill"></div></div>
+          <div class="program-hero-progress-label" id="program-hero-progress-label">0 из 0 дней</div>
+        </div>
+      </div>
+      <div class="program-days-list" id="program-days-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== ПРЕВЬЮ ДНЯ ===== -->
+  <div id="day-preview-screen" class="overlay-screen hidden">
+    <div class="overlay-header">
+      <button class="overlay-back" onclick="closeDayPreview()">←</button>
+      <div class="overlay-header-title" id="day-preview-header">День</div>
+      <div class="overlay-spacer"></div>
+    </div>
+    <div class="overlay-body">
+      <div class="day-hero">
+        <div class="day-hero-num" id="day-preview-day-num">День 1</div>
+        <div class="day-hero-title" id="day-preview-title">Название</div>
+        <div class="day-hero-meta">
+          <span id="day-preview-duration">~ 15 мин</span>
+          <span class="day-hero-dot">•</span>
+          <span id="day-preview-count">10 поз</span>
+        </div>
+        <div class="day-hero-desc" id="day-preview-desc"></div>
+        <button class="btn-start-day" id="btn-start-day" onclick="startSequencePlayer()">▶ Начать практику</button>
+      </div>
+      <div class="day-poses-label">В этой практике</div>
+      <div class="day-poses-list" id="day-preview-poses"></div>
+    </div>
+  </div>
+
+  <!-- ===== ПЛЕЕР ПОСЛЕДОВАТЕЛЬНОСТИ ===== -->
+  <div id="sequence-player" class="player-screen hidden">
+
+    <!-- Хедер плеера -->
+    <div class="player-header">
+      <button class="player-close" onclick="askQuitPlayer()">✕</button>
+      <div class="player-progress-wrap">
+        <div class="player-progress" id="player-progress"></div>
+      </div>
+      <div class="player-counter" id="player-counter">1 / 12</div>
+    </div>
+
+    <!-- Контент: текущая поза -->
+    <div class="player-content">
+      <div class="player-pose-svg" id="player-pose-svg"></div>
+      <div class="player-pose-name" id="player-pose-name">Поза</div>
+      <div class="player-pose-sanskrit" id="player-pose-sanskrit"></div>
+      <div class="player-pose-side hidden" id="player-pose-side"></div>
+      <div class="player-timer" id="player-timer">00:30</div>
+      <div class="player-next-hint" id="player-next-hint"></div>
+    </div>
+
+    <!-- Управление -->
+    <div class="player-controls">
+      <button class="player-btn-secondary" onclick="prevPose()">⏮</button>
+      <button class="player-btn-primary" id="player-btn-pause" onclick="togglePause()">⏸</button>
+      <button class="player-btn-secondary" onclick="nextPose()">⏭</button>
+    </div>
+
+    <!-- Стартовый отсчёт -->
+    <div class="player-countdown hidden" id="player-countdown">
+      <div class="player-countdown-num" id="player-countdown-num">3</div>
+      <div class="player-countdown-label">Приготовься...</div>
+    </div>
+
+    <!-- Финальный экран -->
+    <div class="player-complete hidden" id="player-complete">
+      <div class="complete-icon">🎉</div>
+      <div class="complete-title">Готово!</div>
+      <div class="complete-sub" id="complete-sub">Ты завершил практику. Молодец!</div>
+
+      <div class="complete-stats">
+        <div class="complete-stat">
+          <div class="complete-stat-num" id="complete-duration">15 мин</div>
+          <div class="complete-stat-lbl">время</div>
+        </div>
+        <div class="complete-stat">
+          <div class="complete-stat-num" id="complete-poses-count">12</div>
+          <div class="complete-stat-lbl">поз</div>
+        </div>
+      </div>
+
+      <div class="complete-label">Как прошла практика?</div>
+      <div class="complete-diff-row">
+        <button class="diff-btn diff-1" onclick="finishSequence(1)">🟢<br><span>Легко</span></button>
+        <button class="diff-btn diff-2" onclick="finishSequence(2)">🟡<br><span>Средне</span></button>
+        <button class="diff-btn diff-3" onclick="finishSequence(3)">🟠<br><span>Сложно</span></button>
+        <button class="diff-btn diff-4" onclick="finishSequence(4)">🔴<br><span>Тяжело</span></button>
+      </div>
+    </div>
+
+    <!-- Подтверждение выхода -->
+    <div class="player-quit-confirm hidden" id="player-quit-confirm">
+      <div class="quit-box">
+        <div class="quit-title">Выйти из практики?</div>
+        <div class="quit-sub">Прогресс не сохранится</div>
+        <div class="quit-buttons">
+          <button class="btn-ghost" onclick="cancelQuit()">Продолжить</button>
+          <button class="btn-quit" onclick="confirmQuit()">Выйти</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end sequence-player -->
+
   <script src="svg-poses.js"></script>
   <script src="app.js"></script>
 </body>

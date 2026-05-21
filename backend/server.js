@@ -21,6 +21,7 @@ app.use('/api/progress',     require('./routes/progress'));
 app.use('/api/achievements', require('./routes/achievements'));
 app.use('/api/programs',     require('./routes/programs'));
 app.use('/api/stats',        require('./routes/stats'));
+app.use('/api/poses',        require('./routes/poses'));
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
