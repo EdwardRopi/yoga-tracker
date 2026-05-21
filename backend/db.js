@@ -81,6 +81,24 @@ async function initDB() {
         days_done  INTEGER NOT NULL DEFAULT 0,
         UNIQUE (user_id, program_id)
       );
+
+            CREATE TABLE IF NOT EXISTS pose_favorites (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        pose_id TEXT    NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (user_id, pose_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS user_favorite_poses (
+        id         SERIAL PRIMARY KEY,
+        user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        pose_id    TEXT    NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (user_id, pose_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_favorite_poses_user
+        ON user_favorite_poses(user_id);
     `);
     console.log('PostgreSQL tables ready');
   } finally {
