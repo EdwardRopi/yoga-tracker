@@ -408,6 +408,24 @@
             </button>
           </div>
         </div>
+                <!-- Напоминания -->
+        <div class="settings-section card" id="reminder-card">
+          <div class="settings-title">🔔 Напоминание о практике</div>
+          <div id="reminder-tg-only" class="reminder-note hidden">
+            Доступно только при входе через Telegram
+          </div>
+          <div id="reminder-controls">
+            <div class="name-row" style="margin-bottom:10px">
+              <input type="time" id="reminder-time" class="settings-input" value="09:00" />
+              <button class="btn-small btn-primary" onclick="saveReminder()">Сохранить</button>
+            </div>
+            <div class="toggle-row">
+              <button class="theme-toggle-btn" id="reminder-off-btn" onclick="setReminderOn(false)">🔕 Выкл</button>
+              <button class="theme-toggle-btn" id="reminder-on-btn" onclick="setReminderOn(true)">🔔 Вкл</button>
+            </div>
+            <p class="reminder-hint">Бот пришлёт сообщение, если тренировка не отмечена</p>
+          </div>
+        </div>
 
         <button class="btn-ghost btn-logout" onclick="logout()">Выйти из аккаунта</button>
       </div>
