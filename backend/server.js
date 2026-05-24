@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { initDB } = require('./db');
+const { startReminderScheduler } = require('./reminder');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,8 +41,9 @@ app.use((err, req, res, next) => {
 // Сначала инициализируем БД, потом запускаем сервер
 initDB()
   .then(() => {
-    app.listen(PORT, () => {
+       app.listen(PORT, () => {
       console.log(`Yoga Tracker running on port ${PORT}`);
+      startReminderScheduler();
     });
   })
   .catch(err => {

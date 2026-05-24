@@ -909,6 +909,47 @@ function loadProfile() {
   document.querySelectorAll('.color-theme-btn').forEach(btn => btn.classList.remove('active-color'));
   const colorBtn = document.querySelector(`.theme-${u.color_theme || 'pink'}`);
   if (colorBtn) colorBtn.classList.add('active-color');
+  loadReminder();
+}
+function loadReminder() {
+  const u = state.user;
+  if (!u) return;
+  const hasTelegram = !!u.telegram_id;
+  const noteEl = document.getElementById('reminder-tg-only');
+  const ctrlEl = document.getElementById('reminder-controls');
+  if (!noteEl || !ctrlEl) return;
+  if (!hasTelegram) {
+    noteEl.classList.remove('hidden');
+    ctrlEl.classList.add('hidden');
+    return;
+  }
+  noteEl.classList.add('hidden');
+  ctrlEl.classList.remove('hidden');
+  const timeInput = document.getElementById('reminder-time');
+  if (timeInput && u.reminder_time) {
+    const [hh, mm] = u.reminder_time.split(':');
+    const d = new Date();
+    d.setUTCHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+    timeInput.value =
+      `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  document.getElementById('reminder-off-btn')?.classList.toggle('active-theme', !u.reminder_on);
+  document.getElementById('reminder-on-btn')?.classList.toggle('active-theme', !!u.reminder_on);
+}
+
+async function saveReminder() {
+  const timeInput = document.getElementById('reminder-time');
+  if (!timeInput?.value) return;
+  const [hh, mm] = timeInput.value.split(':');
+  const d = new Date();
+  d.setHours(parseInt(hh, 10), parseInt(mm, 10), 0, 0);
+  const utcTime =
+    `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  await updateProfile({ reminder_time: utcTime });
+}
+
+async function setReminderOn(on) {
+  await updateProfile({ reminder_on: on });
 }
 
 async function selectAvatar(avatar) {
